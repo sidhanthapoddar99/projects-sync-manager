@@ -44,6 +44,17 @@ jobs:
             upx --best "$f" || true
           done
 
+      - name: Package source archives
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          git archive --format=tar.gz --prefix="psm-${VERSION}/" HEAD -o "dist/psm-${VERSION}-source.tar.gz"
+          git archive --format=zip --prefix="psm-${VERSION}/" HEAD -o "dist/psm-${VERSION}-source.zip"
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum * > checksums-sha256.txt
+
       - name: Create GitHub release with binaries
         uses: softprops/action-gh-release@v2
         with:

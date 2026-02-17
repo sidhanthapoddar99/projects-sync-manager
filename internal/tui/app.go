@@ -45,6 +45,8 @@ type Model struct {
 	progressCh chan scanner.ScanProgress
 
 	detailView *DetailView
+
+	confirmRefreshAll bool // waiting for y/n confirmation on full refresh
 }
 
 // NewModel creates a new TUI model.
@@ -180,8 +182,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusText = fmt.Sprintf("Clone failed for %s: %v", msg.path, msg.err)
 			m.statusError = true
 		} else {
-			m.statusText = fmt.Sprintf("Cloned %s", msg.path)
+			m.statusText = fmt.Sprintf("Cloned %s — refreshing status…", msg.path)
 			m.statusError = false
+			// Auto-refresh: find the node by path and update its status
+			clonedPath := filepath.Join(m.rootPath, msg.path)
+			node := findNodeByPath(m.root, clonedPath)
+			if node != nil {
+				scanner.RefreshNode(node)
+				m.rebuildFlatList()
+				m.statusText = fmt.Sprintf("Cloned %s", msg.path)
+			}
 		}
 		return m, nil
 
@@ -230,6 +240,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Detail mode keys
 	if m.viewMode == ViewDetail && m.detailView != nil {
 		return m.handleDetailKey(msg)
+	}
+
+	// Confirm refresh all prompt
+	if m.confirmRefreshAll {
+		switch msg.String() {
+		case "y", "Y":
+			m.confirmRefreshAll = false
+			m.loading = true
+			m.statusText = "Refreshing all repos..."
+			return m, handleRefresh(m.root)
+		default:
+			m.confirmRefreshAll = false
+			m.statusText = "Refresh all cancelled"
+			m.statusError = false
+			return m, nil
+		}
 	}
 
 	// Normal mode keys
@@ -281,9 +307,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "r":
-		m.loading = true
-		m.statusText = "Refreshing..."
-		return m, handleRefresh(m.root)
+		// Individual refresh — just the selected repo
+		if m.selectedIdx < len(m.flatNodes) {
+			node := m.flatNodes[m.selectedIdx]
+			if node.IsGitRepo {
+				m.statusText = fmt.Sprintf("Refreshing %s...", node.Name)
+				return m, func() tea.Msg {
+					scanner.RefreshNode(node)
+					return refreshSingleDoneMsg{node: node}
+				}
+			}
+		}
+	case "R":
+		// Full refresh with confirmation
+		m.confirmRefreshAll = true
+		m.statusText = "Refresh ALL repos from remote? This may take a while. (y/n)"
+		m.statusError = false
+		return m, nil
 	case "f":
 		m.viewMode = ViewRefMenu
 		return m, nil
@@ -376,13 +416,13 @@ func (m Model) handleRefMenuKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleCompareKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
-		if m.compareView.selectedIdx > 0 {
-			m.compareView.selectedIdx--
-		}
+		m.compareView.navigateUp()
 	case "down", "j":
-		if m.compareView.selectedIdx < len(m.compareView.entries)-1 {
-			m.compareView.selectedIdx++
-		}
+		m.compareView.navigateDown()
+	case "right", "l":
+		m.compareView.navigateRight()
+	case "left", "h":
+		m.compareView.navigateLeft()
 	case "enter":
 		return m, m.compareView.handleClone()
 	case "a":
@@ -409,6 +449,19 @@ func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// findNodeByPath walks the tree and returns the node with the given path, or nil.
+func findNodeByPath(root *scanner.TreeNode, path string) *scanner.TreeNode {
+	if root.Path == path {
+		return root
+	}
+	for _, c := range root.Children {
+		if n := findNodeByPath(c, path); n != nil {
+			return n
+		}
+	}
+	return nil
 }
 
 func (m *Model) rebuildFlatList() {
@@ -513,12 +566,16 @@ func (m Model) View() string {
 			styleAction.Render("?") + styleLabel.Render("Help ") +
 			styleAction.Render("Q") + styleLabel.Render("uit")
 	} else {
+	if m.confirmRefreshAll {
+		navLine = styleGitDirty.Render("  Press Y to confirm full refresh, any other key to cancel")
+	} else {
 		navLine = styleLabel.Render("  ↑↓") + styleValue.Render(" siblings  ") +
 			styleLabel.Render("→") + styleValue.Render(" enter dir  ") +
 			styleLabel.Render("←") + styleValue.Render(" back  ") +
 			styleAction.Render("Enter") + styleValue.Render(" details  ") +
 			styleLabel.Render("│ ") +
-			styleAction.Render("R") + styleLabel.Render("efresh ") +
+			styleAction.Render("r") + styleLabel.Render("efresh ") +
+			styleAction.Render("R") + styleLabel.Render("efresh all ") +
 			styleAction.Render("F") + styleLabel.Render("ile ref ") +
 			styleAction.Render("S") + styleLabel.Render("ync ") +
 			styleAction.Render("C") + styleLabel.Render("ode ") +
@@ -526,6 +583,7 @@ func (m Model) View() string {
 			styleAction.Render("B") + styleLabel.Render("rowser ") +
 			styleAction.Render("?") + styleLabel.Render("Help ") +
 			styleAction.Render("Q") + styleLabel.Render("uit")
+	}
 	}
 	statusBar := styleStatusBar.Width(m.width).Render(statusContent + "\n" + navLine)
 
@@ -602,7 +660,8 @@ func (m Model) renderHelp() string {
   C              Open in VS Code
   E              Open in File Explorer
   B              Open remote in Browser
-  R              Refresh all statuses
+  r              Refresh selected repo (fetch from remote)
+  R              Refresh ALL repos (with confirmation)
 
   Reference Files
   ───────────────
