@@ -131,13 +131,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case refreshSingleDoneMsg:
-		// Single repo refresh completed - rebuild detail view and flat list
 		if m.detailView != nil && m.detailView.node == msg.node {
 			m.detailView.rebuild()
 		}
 		m.rebuildFlatList()
 		m.statusText = fmt.Sprintf("Refreshed %s", msg.node.Name)
 		m.statusError = false
+		return m, nil
+
+	case syncBranchDoneMsg:
+		if msg.result.Err != nil {
+			m.statusText = fmt.Sprintf("Branch sync failed: %v", msg.result.Err)
+			m.statusError = true
+		} else {
+			m.statusText = msg.result.Message
+			m.statusError = false
+		}
+		scanner.RefreshNode(msg.node)
+		if m.detailView != nil && m.detailView.node == msg.node {
+			m.detailView.rebuild()
+		}
+		m.rebuildFlatList()
 		return m, nil
 
 	case syncDoneMsg:
@@ -384,16 +398,12 @@ func (m Model) handleCompareKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc", "left", "h":
+	case "esc":
 		m.viewMode = ViewNormal
 		m.detailView = nil
 		return m, nil
-	case "up", "k":
-		m.detailView.moveUp()
-	case "down", "j":
-		m.detailView.moveDown()
-	case "enter":
-		cmd := m.detailView.handleEnter()
+	default:
+		cmd := m.detailView.handleKey(msg)
 		if cmd != nil {
 			return m, cmd
 		}
@@ -496,8 +506,9 @@ func (m Model) View() string {
 	var navLine string
 	if m.viewMode == ViewDetail {
 		navLine = styleLabel.Render("  ↑↓") + styleValue.Render(" navigate  ") +
-			styleAction.Render("Enter") + styleValue.Render(" execute  ") +
-			styleAction.Render("Esc/←") + styleValue.Render(" back to tree  ") +
+			styleAction.Render("Tab") + styleValue.Render(" switch section  ") +
+			styleAction.Render("Enter") + styleValue.Render(" select/execute  ") +
+			styleAction.Render("Esc") + styleValue.Render(" back  ") +
 			styleLabel.Render("│ ") +
 			styleAction.Render("?") + styleLabel.Render("Help ") +
 			styleAction.Render("Q") + styleLabel.Render("uit")
