@@ -103,6 +103,15 @@ func GetRepoStatus(path string) *RepoStatus {
 	return status
 }
 
+// GetRepoStatusFresh fetches from remote first, then returns full status.
+// Use this for explicit refresh (R key) — makes network calls.
+func GetRepoStatusFresh(path string) *RepoStatus {
+	if IsGitRepository(path) {
+		FetchRemote(path)
+	}
+	return GetRepoStatus(path)
+}
+
 // getWorkingTreeStatus returns counts of staged, unstaged, and untracked files.
 func getWorkingTreeStatus(path string) (staged, unstaged, untracked int) {
 	out, err := runGit(path, "status", "--porcelain")

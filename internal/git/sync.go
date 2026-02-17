@@ -18,6 +18,8 @@ type SyncResult struct {
 // - Block if diverged (both ahead and behind)
 // - Block if there are uncommitted changes
 func SyncRepo(repoPath string) SyncResult {
+	// Fetch latest remote state before syncing
+	FetchRemote(repoPath)
 	status := GetRepoStatus(repoPath)
 
 	if !status.IsGitRepo {

@@ -214,14 +214,79 @@ func autoExpand(node *TreeNode) {
 	}
 }
 
-// RefreshNode refreshes the git status of a single node.
+// ExpandNode lazily loads children for a non-git directory that wasn't
+// fully scanned during initial pass (e.g. directories with no git repos).
+func ExpandNode(node *TreeNode) {
+	if node.IsGitRepo || len(node.Children) > 0 {
+		return
+	}
+
+	ignore := loadIgnoreList(node.Path)
+	entries, err := os.ReadDir(node.Path)
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if ignore.shouldIgnore(name) {
+			continue
+		}
+
+		childPath := filepath.Join(node.Path, name)
+		isGit := git.IsGitRepository(childPath)
+		child := &TreeNode{
+			Name:      name,
+			Path:      childPath,
+			IsGitRepo: isGit,
+			Parent:    node,
+			Depth:     node.Depth + 1,
+		}
+
+		if isGit {
+			child.Status = git.GetRepoStatus(childPath)
+		}
+
+		node.Children = append(node.Children, child)
+	}
+
+	sort.Slice(node.Children, func(i, j int) bool {
+		iHasGit := node.Children[i].HasGitDescendant()
+		jHasGit := node.Children[j].HasGitDescendant()
+		if iHasGit != jHasGit {
+			return iHasGit
+		}
+		return strings.ToLower(node.Children[i].Name) < strings.ToLower(node.Children[j].Name)
+	})
+}
+
+// RefreshNode refreshes the git status of a single node (with fetch).
 func RefreshNode(node *TreeNode) {
 	if node.IsGitRepo {
-		node.Status = git.GetRepoStatus(node.Path)
+		node.Status = git.GetRepoStatusFresh(node.Path)
 	}
 }
 
-// RefreshAll refreshes all git statuses concurrently.
+// RefreshAll refreshes all git statuses concurrently (with fetch).
 func RefreshAll(root *TreeNode) {
-	fetchStatusesConcurrently(root, nil)
+	var repos []*TreeNode
+	collectGitRepos(root, &repos)
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, maxWorkers)
+
+	for _, repo := range repos {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(r *TreeNode) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			r.Status = git.GetRepoStatusFresh(r.Path)
+		}(repo)
+	}
+
+	wg.Wait()
 }

@@ -200,37 +200,32 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Normal mode keys
 	switch msg.String() {
 	case "up", "k":
-		if m.selectedIdx > 0 {
-			m.selectedIdx--
-		}
+		m.selectedIdx = navigateUp(m.flatNodes, m.selectedIdx)
 	case "down", "j":
-		if m.selectedIdx < len(m.flatNodes)-1 {
-			m.selectedIdx++
-		}
+		m.selectedIdx = navigateDown(m.flatNodes, m.selectedIdx)
 	case "right", "l":
-		if m.selectedIdx < len(m.flatNodes) {
-			node := m.flatNodes[m.selectedIdx]
-			if !node.IsGitRepo && len(node.Children) > 0 && !node.Expanded {
-				node.Expanded = true
-				m.rebuildFlatList()
-			}
-		}
-	case "left", "h":
-		if m.selectedIdx < len(m.flatNodes) {
-			node := m.flatNodes[m.selectedIdx]
-			if node.Expanded && len(node.Children) > 0 {
-				node.Expanded = false
-				m.rebuildFlatList()
-			} else if node.Parent != nil {
-				// Navigate to parent
+		newIdx, changed := navigateRight(m.flatNodes, m.selectedIdx)
+		if changed {
+			m.rebuildFlatList()
+			// After expand, select first child
+			node := m.flatNodes[newIdx]
+			if len(node.Children) > 0 {
 				for i, n := range m.flatNodes {
-					if n == node.Parent {
+					if n == node.Children[0] {
 						m.selectedIdx = i
 						break
 					}
 				}
 			}
+		} else {
+			m.selectedIdx = newIdx
 		}
+	case "left", "h":
+		newIdx, changed := navigateLeft(m.flatNodes, m.selectedIdx)
+		if changed {
+			m.rebuildFlatList()
+		}
+		m.selectedIdx = newIdx
 	case "r":
 		m.loading = true
 		m.statusText = "Refreshing..."
@@ -384,7 +379,7 @@ func (m Model) View() string {
 	// Calculate panel dimensions
 	leftWidth := m.width*2/5 - 2
 	rightWidth := m.width - leftWidth - 5
-	panelHeight := m.height - 3 // status bar
+	panelHeight := m.height - 4 // status bar (2 lines) + borders
 
 	if leftWidth < 20 {
 		leftWidth = 20
@@ -437,8 +432,19 @@ func (m Model) View() string {
 		statusStyle = styleError
 	}
 	statusContent := statusStyle.Render(m.statusText)
-	commands := styleLabel.Render("  [R]efresh  [F]ile ref  [S]ync  [C]ode  [E]xplorer  [B]rowser  [?]Help  [Q]uit")
-	statusBar := styleStatusBar.Width(m.width).Render(statusContent + "  " + commands)
+	navLine := styleLabel.Render("  ↑↓") + styleValue.Render(" siblings  ") +
+		styleLabel.Render("→") + styleValue.Render(" enter  ") +
+		styleLabel.Render("←") + styleValue.Render(" back  ") +
+		styleLabel.Render("│ ") +
+		styleAction.Render("R") + styleLabel.Render("efresh ") +
+		styleAction.Render("F") + styleLabel.Render("ile ref ") +
+		styleAction.Render("S") + styleLabel.Render("ync ") +
+		styleAction.Render("C") + styleLabel.Render("ode ") +
+		styleAction.Render("E") + styleLabel.Render("xplorer ") +
+		styleAction.Render("B") + styleLabel.Render("rowser ") +
+		styleAction.Render("?") + styleLabel.Render("Help ") +
+		styleAction.Render("Q") + styleLabel.Render("uit")
+	statusBar := styleStatusBar.Width(m.width).Render(statusContent + "\n" + navLine)
 
 	return panels + "\n" + statusBar
 }

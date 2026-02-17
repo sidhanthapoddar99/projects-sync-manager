@@ -83,14 +83,8 @@ func (cv *CompareView) renderLeft(width, height int) string {
 	lines = append(lines, styleLabel.Render(summary))
 	lines = append(lines, "")
 
-	startIdx := 0
-	if cv.selectedIdx >= height-6 {
-		startIdx = cv.selectedIdx - height + 7
-	}
-	endIdx := startIdx + height - 6
-	if endIdx > len(cv.entries) {
-		endIdx = len(cv.entries)
-	}
+	listHeight := height - 6
+	startIdx, endIdx := centeredWindow(cv.selectedIdx, len(cv.entries), listHeight)
 
 	for i := startIdx; i < endIdx; i++ {
 		e := cv.entries[i]

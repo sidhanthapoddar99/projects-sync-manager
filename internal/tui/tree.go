@@ -9,6 +9,23 @@ import (
 	"github.com/sid/psm/internal/scanner"
 )
 
+// renderLegend renders the compact legend at the top of the left panel.
+func renderLegend() string {
+	return styleLabel.Render("  ") +
+		styleGitSynced.Render("●✓") + styleLabel.Render("synced ") +
+		styleGitPartial.Render("△") + styleLabel.Render("partial ") +
+		styleGitDirty.Render("✗") + styleLabel.Render("dirty ") +
+		styleGitNoRemote.Render("?") + styleLabel.Render("no remote ") +
+		styleNonGit.Render("○") + styleLabel.Render("no git") +
+		"\n" +
+		styleLabel.Render("  ") +
+		styleGitPartial.Render("↑") + styleLabel.Render("push ") +
+		styleGitPartial.Render("↓") + styleLabel.Render("pull ") +
+		styleGitSynced.Render("+") + styleLabel.Render("staged ") +
+		styleGitDirty.Render("~") + styleLabel.Render("unstaged ") +
+		styleNonGit.Render("…") + styleLabel.Render("untracked")
+}
+
 // renderTree renders the left panel tree view.
 func renderTree(nodes []*scanner.TreeNode, selectedIdx int, width, height int) string {
 	if len(nodes) == 0 {
@@ -17,15 +34,16 @@ func renderTree(nodes []*scanner.TreeNode, selectedIdx int, width, height int) s
 
 	var lines []string
 
-	// Calculate visible window (scrolling)
-	startIdx := 0
-	if selectedIdx >= height-2 {
-		startIdx = selectedIdx - height + 3
-	}
-	endIdx := startIdx + height - 2
-	if endIdx > len(nodes) {
-		endIdx = len(nodes)
-	}
+	// Legend at the top
+	legend := renderLegend()
+	lines = append(lines, legend)
+	lines = append(lines, styleTreePrefix.Render("  "+strings.Repeat("─", width-4)))
+
+	legendLines := 3 // legend + separator + blank line
+	treeHeight := height - legendLines - 1 // -1 for possible scroll indicator
+
+	// Center the selected item in the viewport
+	startIdx, endIdx := centeredWindow(selectedIdx, len(nodes), treeHeight)
 
 	for i := startIdx; i < endIdx; i++ {
 		node := nodes[i]
@@ -175,4 +193,37 @@ func getNameStyle(node *scanner.TreeNode) lipgloss.Style {
 	default:
 		return styleNonGit
 	}
+}
+
+// centeredWindow calculates a viewport window that keeps selectedIdx centered.
+// Returns (startIdx, endIdx) for the visible slice.
+//
+// - If the list is shorter than the viewport, show everything.
+// - If selected is near the top, pin to top.
+// - If selected is near the bottom, pin to bottom.
+// - Otherwise, center the selection.
+func centeredWindow(selectedIdx, totalItems, viewportHeight int) (int, int) {
+	if totalItems <= viewportHeight {
+		return 0, totalItems
+	}
+
+	half := viewportHeight / 2
+
+	// Try to center the selected item
+	startIdx := selectedIdx - half
+	endIdx := startIdx + viewportHeight
+
+	// Pin to top
+	if startIdx < 0 {
+		startIdx = 0
+		endIdx = viewportHeight
+	}
+
+	// Pin to bottom
+	if endIdx > totalItems {
+		endIdx = totalItems
+		startIdx = endIdx - viewportHeight
+	}
+
+	return startIdx, endIdx
 }

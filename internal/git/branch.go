@@ -35,11 +35,14 @@ func (b *BranchStatus) StatusLabel() string {
 	return "✓ synced"
 }
 
-// GetBranchStatuses returns the status of all branches in a repo.
-func GetBranchStatuses(repoPath string) []BranchStatus {
-	// Fetch remote info silently (ignore errors - offline is fine)
+// FetchRemote fetches all remotes for a repo. Called only on explicit refresh/sync.
+func FetchRemote(repoPath string) {
 	_, _ = runGit(repoPath, "fetch", "--all", "--quiet")
+}
 
+// GetBranchStatuses returns the status of all branches in a repo.
+// Uses local tracking refs only — call FetchRemote first if you want fresh data.
+func GetBranchStatuses(repoPath string) []BranchStatus {
 	branches := make(map[string]*BranchStatus)
 
 	// Local branches

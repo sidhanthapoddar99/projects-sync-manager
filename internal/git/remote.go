@@ -71,8 +71,11 @@ func SSHToHTTPS(url string) string {
 }
 
 // runGit executes a git command in the given directory and returns stdout.
+// It passes -c safe.directory=* to handle copied/moved repositories that
+// git considers "unsafe" due to ownership mismatch.
 func runGit(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	fullArgs := append([]string{"-c", "safe.directory=*"}, args...)
+	cmd := exec.Command("git", fullArgs...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
