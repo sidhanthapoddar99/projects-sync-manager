@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Build binaries
+        run: |
+          mkdir -p dist
+          for pair in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            GOOS=${pair%/*}
+            GOARCH=${pair#*/}
+            EXT=""
+            [ "$GOOS" = "windows" ] && EXT=".exe"
+            echo "Building ${GOOS}/${GOARCH}..."
+            CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build \
+              -ldflags="-s -w -X main.version=${{ steps.version.outputs.VERSION }}" \
+              -o "dist/psm-${GOOS}-${GOARCH}${EXT}" \
+              ./cmd/
+          done
+
+      - name: Compress binaries
+        run: |
+          sudo apt-get update && sudo apt-get install -y upx-ucl
+          for f in dist/psm-linux-* dist/psm-darwin-*; do
+            upx --best "$f" || true
+          done
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

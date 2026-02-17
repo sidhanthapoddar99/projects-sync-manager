@@ -1,0 +1,21 @@
+# Binaries
+psm
+psm-*
+*.exe
+dist/
+
+# Go
+vendor/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Reference files (user-generated, not tracked)
+projects-ref.json
