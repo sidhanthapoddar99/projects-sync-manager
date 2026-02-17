@@ -6,11 +6,26 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/sid/psm/internal/git"
 )
 
 const maxWorkers = 10
+
+// ScanProgress reports scanning progress back to the caller.
+type ScanProgress struct {
+	Phase          string // "dirs" or "status"
+	DirsScanned    int
+	DirsTotal      int // 0 if unknown
+	ReposFound     int
+	ReposFetched   int
+	ReposTotal     int
+	CurrentDir     string
+}
+
+// ProgressFunc is a callback invoked during scanning to report progress.
+type ProgressFunc func(ScanProgress)
 
 // TreeNode represents a directory node in the scanned tree.
 type TreeNode struct {
@@ -50,8 +65,8 @@ func (n *TreeNode) FlattenVisible() []*TreeNode {
 }
 
 // ScanDirectory scans a directory tree up to maxDepth looking for git repos.
-// Non-git directories with no git descendants are shown collapsed.
-func ScanDirectory(rootPath string, maxDepth int) *TreeNode {
+// If onProgress is non-nil, it's called periodically with scan progress.
+func ScanDirectory(rootPath string, maxDepth int, onProgress ProgressFunc) *TreeNode {
 	absPath, err := filepath.Abs(rootPath)
 	if err != nil {
 		absPath = rootPath
@@ -64,8 +79,16 @@ func ScanDirectory(rootPath string, maxDepth int) *TreeNode {
 		Depth:    0,
 	}
 
-	scanChildren(root, maxDepth)
-	fetchStatusesConcurrently(root)
+	// Load ignore patterns from .psmignore + built-in defaults
+	ignore := loadIgnoreList(absPath)
+
+	// Phase 1: scan directory tree
+	var dirsScanned int32
+	var reposFound int32
+	scanChildren(root, maxDepth, ignore, &dirsScanned, &reposFound, onProgress)
+
+	// Phase 2: fetch git statuses concurrently
+	fetchStatusesConcurrently(root, onProgress)
 
 	// Auto-expand folders that contain git repos
 	autoExpand(root)
@@ -73,7 +96,7 @@ func ScanDirectory(rootPath string, maxDepth int) *TreeNode {
 	return root
 }
 
-func scanChildren(node *TreeNode, maxDepth int) {
+func scanChildren(node *TreeNode, maxDepth int, ignore *ignoreList, dirsScanned, reposFound *int32, onProgress ProgressFunc) {
 	if node.Depth >= maxDepth {
 		return
 	}
@@ -88,23 +111,41 @@ func scanChildren(node *TreeNode, maxDepth int) {
 			continue
 		}
 		name := entry.Name()
-		// Skip hidden directories and common non-project dirs
-		if strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" || name == "__pycache__" {
+
+		// Check against ignore list (built-in + .psmignore)
+		if ignore.shouldIgnore(name) {
 			continue
 		}
 
 		childPath := filepath.Join(node.Path, name)
+		isGit := git.IsGitRepository(childPath)
+
 		child := &TreeNode{
 			Name:      name,
 			Path:      childPath,
-			IsGitRepo: git.IsGitRepository(childPath),
+			IsGitRepo: isGit,
 			Parent:    node,
 			Depth:     node.Depth + 1,
 		}
 
-		// Don't recurse into git repos (they're leaf nodes)
-		if !child.IsGitRepo {
-			scanChildren(child, maxDepth)
+		atomic.AddInt32(dirsScanned, 1)
+		if isGit {
+			atomic.AddInt32(reposFound, 1)
+		}
+
+		// Report progress
+		if onProgress != nil {
+			onProgress(ScanProgress{
+				Phase:       "dirs",
+				DirsScanned: int(atomic.LoadInt32(dirsScanned)),
+				ReposFound:  int(atomic.LoadInt32(reposFound)),
+				CurrentDir:  name,
+			})
+		}
+
+		// Stop recursing once a git repo is found — it's a leaf
+		if !isGit {
+			scanChildren(child, maxDepth, ignore, dirsScanned, reposFound, onProgress)
 		}
 
 		node.Children = append(node.Children, child)
@@ -122,9 +163,12 @@ func scanChildren(node *TreeNode, maxDepth int) {
 }
 
 // fetchStatusesConcurrently fetches git status for all git repos using a worker pool.
-func fetchStatusesConcurrently(root *TreeNode) {
+func fetchStatusesConcurrently(root *TreeNode, onProgress ProgressFunc) {
 	var repos []*TreeNode
 	collectGitRepos(root, &repos)
+
+	total := len(repos)
+	var fetched int32
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, maxWorkers)
@@ -136,6 +180,16 @@ func fetchStatusesConcurrently(root *TreeNode) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			r.Status = git.GetRepoStatus(r.Path)
+
+			done := int(atomic.AddInt32(&fetched, 1))
+			if onProgress != nil {
+				onProgress(ScanProgress{
+					Phase:        "status",
+					ReposFetched: done,
+					ReposTotal:   total,
+					CurrentDir:   r.Name,
+				})
+			}
 		}(repo)
 	}
 
@@ -169,5 +223,5 @@ func RefreshNode(node *TreeNode) {
 
 // RefreshAll refreshes all git statuses concurrently.
 func RefreshAll(root *TreeNode) {
-	fetchStatusesConcurrently(root)
+	fetchStatusesConcurrently(root, nil)
 }

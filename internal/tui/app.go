@@ -36,18 +36,21 @@ type Model struct {
 	statusText  string
 	statusError bool
 
-	rootPath string
-	maxDepth int
+	rootPath   string
+	maxDepth   int
 
-	loading bool
+	loading    bool
+	progress   scanner.ScanProgress
+	progressCh chan scanner.ScanProgress
 }
 
 // NewModel creates a new TUI model.
 func NewModel(rootPath string, maxDepth int) Model {
 	return Model{
-		rootPath: rootPath,
-		maxDepth: maxDepth,
-		loading:  true,
+		rootPath:   rootPath,
+		maxDepth:   maxDepth,
+		loading:    true,
+		progressCh: make(chan scanner.ScanProgress, 100),
 	}
 }
 
@@ -56,14 +59,44 @@ type scanDoneMsg struct {
 	root *scanner.TreeNode
 }
 
+// scanProgressMsg carries live progress updates from the scanner.
+type scanProgressMsg struct {
+	progress scanner.ScanProgress
+}
+
+// waitForProgress returns a Cmd that waits for the next progress message on the channel.
+func waitForProgress(ch chan scanner.ScanProgress) tea.Cmd {
+	return func() tea.Msg {
+		p, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return scanProgressMsg{progress: p}
+	}
+}
+
 // Init initializes the model.
 func (m Model) Init() tea.Cmd {
 	rootPath := m.rootPath
 	maxDepth := m.maxDepth
-	return func() tea.Msg {
-		root := scanner.ScanDirectory(rootPath, maxDepth)
+	ch := m.progressCh
+
+	// Generate default .psmignore if it doesn't exist
+	_ = scanner.GenerateDefaultIgnoreFile(rootPath)
+
+	scanCmd := func() tea.Msg {
+		root := scanner.ScanDirectory(rootPath, maxDepth, func(p scanner.ScanProgress) {
+			// Non-blocking send — drop if the channel buffer is full
+			select {
+			case ch <- p:
+			default:
+			}
+		})
+		close(ch)
 		return scanDoneMsg{root: root}
 	}
+
+	return tea.Batch(scanCmd, waitForProgress(ch))
 }
 
 // Update handles messages.
@@ -74,6 +107,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
+
+	case scanProgressMsg:
+		m.progress = msg.progress
+		// Keep listening for more progress
+		return m, waitForProgress(m.progressCh)
 
 	case scanDoneMsg:
 		m.root = msg.root
@@ -330,9 +368,7 @@ func (m Model) View() string {
 	}
 
 	if m.loading && m.root == nil {
-		return lipgloss.Place(m.width, m.height,
-			lipgloss.Center, lipgloss.Center,
-			styleInfo.Render("Scanning directories..."))
+		return m.renderLoading()
 	}
 
 	// Help overlay
@@ -405,6 +441,61 @@ func (m Model) View() string {
 	statusBar := styleStatusBar.Width(m.width).Render(statusContent + "  " + commands)
 
 	return panels + "\n" + statusBar
+}
+
+func (m Model) renderLoading() string {
+	p := m.progress
+	var lines []string
+
+	lines = append(lines, styleHeader.Render("  Projects Sync Manager"))
+	lines = append(lines, "")
+
+	spinner := [...]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	frame := spinner[(p.DirsScanned+p.ReposFetched)%len(spinner)]
+
+	switch p.Phase {
+	case "status":
+		// Phase 2: fetching git statuses
+		lines = append(lines, styleInfo.Render(fmt.Sprintf("  %s Fetching git status...", frame)))
+		lines = append(lines, "")
+		lines = append(lines, styleLabel.Render(fmt.Sprintf("  Repos: %d / %d", p.ReposFetched, p.ReposTotal)))
+
+		// Progress bar
+		if p.ReposTotal > 0 {
+			barWidth := 30
+			filled := barWidth * p.ReposFetched / p.ReposTotal
+			bar := styleGitSynced.Render(strings.Repeat("█", filled)) +
+				styleNonGit.Render(strings.Repeat("░", barWidth-filled))
+			pct := 100 * p.ReposFetched / p.ReposTotal
+			lines = append(lines, fmt.Sprintf("  %s %d%%", bar, pct))
+		}
+
+		if p.CurrentDir != "" {
+			lines = append(lines, "")
+			lines = append(lines, styleLabel.Render("  Current: ")+styleValue.Render(p.CurrentDir))
+		}
+
+	default:
+		// Phase 1: scanning directories
+		lines = append(lines, styleInfo.Render(fmt.Sprintf("  %s Scanning directories...", frame)))
+		lines = append(lines, "")
+		lines = append(lines, styleLabel.Render(fmt.Sprintf("  Directories scanned: %d", p.DirsScanned)))
+		lines = append(lines, styleGitSynced.Render(fmt.Sprintf("  Git repos found:     %d", p.ReposFound)))
+
+		if p.CurrentDir != "" {
+			lines = append(lines, "")
+			lines = append(lines, styleLabel.Render("  Scanning: ")+styleValue.Render(p.CurrentDir))
+		}
+	}
+
+	content := strings.Join(lines, "\n")
+
+	return lipgloss.Place(m.width, m.height,
+		lipgloss.Center, lipgloss.Center,
+		stylePanelBorder.
+			Width(46).
+			Padding(1, 2).
+			Render(content))
 }
 
 func (m Model) renderHelp() string {
