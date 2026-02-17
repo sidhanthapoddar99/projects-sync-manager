@@ -19,6 +19,7 @@ const (
 	ViewCompare          // Reference file comparison
 	ViewRefMenu          // Reference file menu overlay
 	ViewHelp             // Help overlay
+	ViewDetail           // Repo detail / interactive right panel
 )
 
 // Model is the main bubbletea model.
@@ -42,6 +43,8 @@ type Model struct {
 	loading    bool
 	progress   scanner.ScanProgress
 	progressCh chan scanner.ScanProgress
+
+	detailView *DetailView
 }
 
 // NewModel creates a new TUI model.
@@ -127,6 +130,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		return m, nil
 
+	case refreshSingleDoneMsg:
+		// Single repo refresh completed - rebuild detail view and flat list
+		if m.detailView != nil && m.detailView.node == msg.node {
+			m.detailView.rebuild()
+		}
+		m.rebuildFlatList()
+		m.statusText = fmt.Sprintf("Refreshed %s", msg.node.Name)
+		m.statusError = false
+		return m, nil
+
 	case syncDoneMsg:
 		if msg.result.Err != nil {
 			m.statusText = fmt.Sprintf("Sync failed: %v", msg.result.Err)
@@ -137,6 +150,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Auto-refresh the affected node
 		scanner.RefreshNode(msg.node)
+		if m.detailView != nil && m.detailView.node == msg.node {
+			m.detailView.rebuild()
+		}
 		m.rebuildFlatList()
 		return m, nil
 
@@ -197,6 +213,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleCompareKey(msg)
 	}
 
+	// Detail mode keys
+	if m.viewMode == ViewDetail && m.detailView != nil {
+		return m.handleDetailKey(msg)
+	}
+
 	// Normal mode keys
 	switch msg.String() {
 	case "up", "k":
@@ -204,21 +225,31 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		m.selectedIdx = navigateDown(m.flatNodes, m.selectedIdx)
 	case "right", "l":
-		newIdx, changed := navigateRight(m.flatNodes, m.selectedIdx)
-		if changed {
-			m.rebuildFlatList()
-			// After expand, select first child
-			node := m.flatNodes[newIdx]
-			if len(node.Children) > 0 {
+		if m.selectedIdx < len(m.flatNodes) {
+			targetNode := m.flatNodes[m.selectedIdx] // save reference before rebuild
+			newIdx, changed := navigateRight(m.flatNodes, m.selectedIdx)
+			if changed {
+				m.rebuildFlatList()
+				// Find the expanded node in the new flat list and select its first child
 				for i, n := range m.flatNodes {
-					if n == node.Children[0] {
-						m.selectedIdx = i
+					if n == targetNode {
+						if len(targetNode.Children) > 0 {
+							// Find first child in new flat list
+							for j, c := range m.flatNodes {
+								if c == targetNode.Children[0] {
+									m.selectedIdx = j
+									break
+								}
+							}
+						} else {
+							m.selectedIdx = i
+						}
 						break
 					}
 				}
+			} else {
+				m.selectedIdx = newIdx
 			}
-		} else {
-			m.selectedIdx = newIdx
 		}
 	case "left", "h":
 		newIdx, changed := navigateLeft(m.flatNodes, m.selectedIdx)
@@ -226,6 +257,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.rebuildFlatList()
 		}
 		m.selectedIdx = newIdx
+	case "enter":
+		if m.selectedIdx < len(m.flatNodes) {
+			node := m.flatNodes[m.selectedIdx]
+			if node.IsGitRepo && node.Status != nil {
+				m.detailView = newDetailView(node)
+				m.viewMode = ViewDetail
+				return m, nil
+			}
+		}
 	case "r":
 		m.loading = true
 		m.statusText = "Refreshing..."
@@ -342,6 +382,25 @@ func (m Model) handleCompareKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "left", "h":
+		m.viewMode = ViewNormal
+		m.detailView = nil
+		return m, nil
+	case "up", "k":
+		m.detailView.moveUp()
+	case "down", "j":
+		m.detailView.moveDown()
+	case "enter":
+		cmd := m.detailView.handleEnter()
+		if cmd != nil {
+			return m, cmd
+		}
+	}
+	return m, nil
+}
+
 func (m *Model) rebuildFlatList() {
 	if m.root == nil {
 		m.flatNodes = nil
@@ -403,7 +462,9 @@ func (m Model) View() string {
 
 	// Right panel
 	var rightContent string
-	if m.viewMode == ViewCompare && m.compareView != nil {
+	if m.viewMode == ViewDetail && m.detailView != nil {
+		rightContent = m.detailView.render(rightWidth, panelHeight)
+	} else if m.viewMode == ViewCompare && m.compareView != nil {
 		rightContent = m.compareView.renderRight(rightWidth, panelHeight)
 	} else {
 		var selectedNode *scanner.TreeNode
@@ -432,18 +493,29 @@ func (m Model) View() string {
 		statusStyle = styleError
 	}
 	statusContent := statusStyle.Render(m.statusText)
-	navLine := styleLabel.Render("  ↑↓") + styleValue.Render(" siblings  ") +
-		styleLabel.Render("→") + styleValue.Render(" enter  ") +
-		styleLabel.Render("←") + styleValue.Render(" back  ") +
-		styleLabel.Render("│ ") +
-		styleAction.Render("R") + styleLabel.Render("efresh ") +
-		styleAction.Render("F") + styleLabel.Render("ile ref ") +
-		styleAction.Render("S") + styleLabel.Render("ync ") +
-		styleAction.Render("C") + styleLabel.Render("ode ") +
-		styleAction.Render("E") + styleLabel.Render("xplorer ") +
-		styleAction.Render("B") + styleLabel.Render("rowser ") +
-		styleAction.Render("?") + styleLabel.Render("Help ") +
-		styleAction.Render("Q") + styleLabel.Render("uit")
+	var navLine string
+	if m.viewMode == ViewDetail {
+		navLine = styleLabel.Render("  ↑↓") + styleValue.Render(" navigate  ") +
+			styleAction.Render("Enter") + styleValue.Render(" execute  ") +
+			styleAction.Render("Esc/←") + styleValue.Render(" back to tree  ") +
+			styleLabel.Render("│ ") +
+			styleAction.Render("?") + styleLabel.Render("Help ") +
+			styleAction.Render("Q") + styleLabel.Render("uit")
+	} else {
+		navLine = styleLabel.Render("  ↑↓") + styleValue.Render(" siblings  ") +
+			styleLabel.Render("→") + styleValue.Render(" enter dir  ") +
+			styleLabel.Render("←") + styleValue.Render(" back  ") +
+			styleAction.Render("Enter") + styleValue.Render(" details  ") +
+			styleLabel.Render("│ ") +
+			styleAction.Render("R") + styleLabel.Render("efresh ") +
+			styleAction.Render("F") + styleLabel.Render("ile ref ") +
+			styleAction.Render("S") + styleLabel.Render("ync ") +
+			styleAction.Render("C") + styleLabel.Render("ode ") +
+			styleAction.Render("E") + styleLabel.Render("xplorer ") +
+			styleAction.Render("B") + styleLabel.Render("rowser ") +
+			styleAction.Render("?") + styleLabel.Render("Help ") +
+			styleAction.Render("Q") + styleLabel.Render("uit")
+	}
 	statusBar := styleStatusBar.Width(m.width).Render(statusContent + "\n" + navLine)
 
 	return panels + "\n" + statusBar

@@ -15,13 +15,13 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.21"
+          go-version-file: "go.mod"
 
       - name: Get version from tag
         id: version
         run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
 
-      - name: Build binaries
+      - name: Build all binaries
         run: |
           mkdir -p dist
           for pair in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
@@ -39,11 +39,12 @@ jobs:
       - name: Compress binaries
         run: |
           sudo apt-get update && sudo apt-get install -y upx-ucl
-          for f in dist/psm-linux-* dist/psm-darwin-*; do
+          # UPX doesn't support darwin binaries cross-compiled, skip them
+          for f in dist/psm-linux-*; do
             upx --best "$f" || true
           done
 
-      - name: Create release
+      - name: Create GitHub release with binaries
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*

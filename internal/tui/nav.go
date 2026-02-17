@@ -101,6 +101,7 @@ func navigateRight(flatNodes []*scanner.TreeNode, selectedIdx int) (int, bool) {
 }
 
 // navigateLeft collapses the current directory or moves to parent.
+// Folders that contain git repos (directly or nested) cannot be collapsed.
 // Returns new selectedIdx and whether the tree structure changed.
 func navigateLeft(flatNodes []*scanner.TreeNode, selectedIdx int) (int, bool) {
 	if selectedIdx < 0 || selectedIdx >= len(flatNodes) {
@@ -109,8 +110,8 @@ func navigateLeft(flatNodes []*scanner.TreeNode, selectedIdx int) (int, bool) {
 
 	node := flatNodes[selectedIdx]
 
-	// If this node is expanded, collapse it
-	if node.Expanded && len(node.Children) > 0 {
+	// If this node is expanded AND does NOT contain git repos, collapse it
+	if node.Expanded && len(node.Children) > 0 && !node.HasGitDescendant() {
 		node.Expanded = false
 		return selectedIdx, true // tree changed, caller rebuilds
 	}
