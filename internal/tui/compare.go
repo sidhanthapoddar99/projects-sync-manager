@@ -557,6 +557,24 @@ func renderSyncStateBadge(state git.SyncState) string {
 	}
 }
 
+// markCloned updates a missing entry to matched after a successful clone.
+func (cv *CompareView) markCloned(relPath string, node *scanner.TreeNode) {
+	var walk func(n *compareTreeNode)
+	walk = func(n *compareTreeNode) {
+		if n.Entry != nil && n.Entry.path == relPath && n.Entry.status == "missing" {
+			n.Entry.status = "matched"
+			n.Entry.indicator = "[==]"
+			n.Entry.node = node
+			return
+		}
+		for _, c := range n.Children {
+			walk(c)
+		}
+	}
+	walk(cv.treeRoot)
+	cv.rebuildFlatList()
+}
+
 // --- Actions ---
 
 func (cv *CompareView) selectedEntry() *compareEntry {

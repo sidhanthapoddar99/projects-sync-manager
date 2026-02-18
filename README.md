@@ -8,33 +8,40 @@ Scan a directory tree, see the sync status of every repo at a glance, pull/push 
 
 ## Quick Start
 
+One command — auto-detects your OS/arch, downloads the latest binary, caches it, and runs it. Subsequent runs skip the download.
+
+**Linux / macOS:**
 ```bash
-# --- Use once and discard (downloaded to /tmp, gone on reboot) ---
+curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/install.sh | sh -s -- -d ~/projects
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/install.ps1 | iex
+```
+
+That's it. The binary is cached in your temp folder (`/tmp/psm-cache/` or `%TEMP%\psm-cache\`) and reused on future runs. A new version is downloaded automatically when a release is published.
+
+<details>
+<summary>Other installation methods</summary>
+
+```bash
+# --- Direct download (no caching, fresh every time) ---
 
 # Linux (amd64)
 curl -sL https://github.com/sidhanthapoddar99/projects-sync-manager/releases/latest/download/psm-linux-amd64 -o /tmp/psm && chmod +x /tmp/psm && /tmp/psm -d ~/projects
 
-# Linux (arm64)
-curl -sL https://github.com/sidhanthapoddar99/projects-sync-manager/releases/latest/download/psm-linux-arm64 -o /tmp/psm && chmod +x /tmp/psm && /tmp/psm -d ~/projects
-
 # macOS (Apple Silicon)
 curl -sL https://github.com/sidhanthapoddar99/projects-sync-manager/releases/latest/download/psm-darwin-arm64 -o /tmp/psm && chmod +x /tmp/psm && /tmp/psm -d ~/projects
 
-# macOS (Intel)
-curl -sL https://github.com/sidhanthapoddar99/projects-sync-manager/releases/latest/download/psm-darwin-amd64 -o /tmp/psm && chmod +x /tmp/psm && /tmp/psm -d ~/projects
-
-# --- Use a specific version (replace v0.1.0 with desired tag) ---
-curl -sL https://github.com/sidhanthapoddar99/projects-sync-manager/releases/download/v0.1.0/psm-linux-amd64 -o /tmp/psm && chmod +x /tmp/psm && /tmp/psm
-
-# --- Download and keep (install to PATH for reuse) ---
+# --- Install to PATH for permanent use ---
 sudo curl -sL https://github.com/sidhanthapoddar99/projects-sync-manager/releases/latest/download/psm-linux-amd64 -o /usr/local/bin/psm && sudo chmod +x /usr/local/bin/psm
 
-# --- Windows (PowerShell) ---
-# Invoke-WebRequest -Uri https://github.com/sidhanthapoddar99/projects-sync-manager/releases/latest/download/psm-windows-amd64.exe -OutFile $env:TEMP\psm.exe; & $env:TEMP\psm.exe -d C:\projects
-
 # --- Install via Go ---
-# go install github.com/sidhanthapoddar99/projects-sync-manager/cmd@latest
+go install github.com/sidhanthapoddar99/projects-sync-manager/cmd@latest
 ```
+
+</details>
 
 ---
 
@@ -60,7 +67,8 @@ Flags:
 | `C` | Open in VS Code |
 | `E` | Open in file explorer |
 | `B` | Open remote repo in browser |
-| `R` | Refresh all statuses (fetches from remote) |
+| `r` | Refresh selected repo (fetch from remote) |
+| `R` | Refresh ALL repos (with y/n confirmation) |
 | `F` | Reference file menu |
 | `Q` | Quit |
 | `?` | Help |
@@ -130,7 +138,9 @@ git push origin v0.1.0
 The workflow at `.github/workflows/release.yml` automatically:
 1. Builds static binaries for Linux, macOS, and Windows
 2. Compresses Linux binaries with UPX
-3. Creates a GitHub release with all binaries attached
+3. Packages source archives (.tar.gz and .zip)
+4. Generates SHA256 checksums for all artifacts
+5. Creates a GitHub release with everything attached
 
 ---
 

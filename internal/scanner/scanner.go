@@ -263,6 +263,81 @@ func ExpandNode(node *TreeNode) {
 	})
 }
 
+// InsertNode adds a newly cloned repo into the scanner tree at the correct position.
+// It creates any missing intermediate directory nodes along the path.
+// Returns the new node, or nil if the path doesn't fit under root.
+func InsertNode(root *TreeNode, absPath string) *TreeNode {
+	relPath, err := filepath.Rel(root.Path, absPath)
+	if err != nil || strings.HasPrefix(relPath, "..") {
+		return nil
+	}
+
+	parts := strings.Split(relPath, string(filepath.Separator))
+	current := root
+
+	for i, part := range parts {
+		isLast := i == len(parts)-1
+
+		// Look for existing child
+		var found *TreeNode
+		for _, c := range current.Children {
+			if c.Name == part {
+				found = c
+				break
+			}
+		}
+
+		if found != nil {
+			if isLast {
+				// Node already exists — just refresh it as a git repo
+				found.IsGitRepo = git.IsGitRepository(found.Path)
+				if found.IsGitRepo {
+					found.Status = git.GetRepoStatus(found.Path)
+				}
+				found.Expanded = true
+				autoExpand(current)
+				return found
+			}
+			current = found
+			continue
+		}
+
+		// Create new node
+		childPath := filepath.Join(current.Path, part)
+		isGit := isLast && git.IsGitRepository(childPath)
+		child := &TreeNode{
+			Name:      part,
+			Path:      childPath,
+			IsGitRepo: isGit,
+			Parent:    current,
+			Expanded:  true,
+			Depth:     current.Depth + 1,
+		}
+		if isGit {
+			child.Status = git.GetRepoStatus(childPath)
+		}
+		current.Children = append(current.Children, child)
+
+		// Sort children after insertion
+		sort.Slice(current.Children, func(i, j int) bool {
+			iHasGit := current.Children[i].HasGitDescendant()
+			jHasGit := current.Children[j].HasGitDescendant()
+			if iHasGit != jHasGit {
+				return iHasGit
+			}
+			return strings.ToLower(current.Children[i].Name) < strings.ToLower(current.Children[j].Name)
+		})
+
+		if isLast {
+			autoExpand(root)
+			return child
+		}
+		current = child
+	}
+
+	return nil
+}
+
 // RefreshNode refreshes the git status of a single node (with fetch).
 func RefreshNode(node *TreeNode) {
 	if node.IsGitRepo {

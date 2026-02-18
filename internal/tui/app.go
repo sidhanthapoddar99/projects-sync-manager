@@ -182,15 +182,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusText = fmt.Sprintf("Clone failed for %s: %v", msg.path, msg.err)
 			m.statusError = true
 		} else {
-			m.statusText = fmt.Sprintf("Cloned %s — refreshing status…", msg.path)
+			m.statusText = fmt.Sprintf("Cloned %s", msg.path)
 			m.statusError = false
-			// Auto-refresh: find the node by path and update its status
 			clonedPath := filepath.Join(m.rootPath, msg.path)
-			node := findNodeByPath(m.root, clonedPath)
-			if node != nil {
-				scanner.RefreshNode(node)
+			// Insert into the scanner tree and get status
+			newNode := scanner.InsertNode(m.root, clonedPath)
+			if newNode != nil {
 				m.rebuildFlatList()
-				m.statusText = fmt.Sprintf("Cloned %s", msg.path)
+			}
+			// Update compare view if active
+			if m.viewMode == ViewCompare && m.compareView != nil {
+				m.compareView.markCloned(msg.path, newNode)
 			}
 		}
 		return m, nil
@@ -198,6 +200,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case cloneAllDoneMsg:
 		m.statusText = fmt.Sprintf("Cloned %d repos, %d failed", msg.cloned, msg.failed)
 		m.statusError = msg.failed > 0
+		if m.viewMode == ViewCompare && m.compareView != nil {
+			// Re-run the comparison with updated scanner tree
+			ref, err := reference.Load(filepath.Join(m.rootPath, "projects-ref.json"))
+			if err == nil {
+				result := reference.Compare(ref, m.root)
+				m.compareView = newCompareView(result, m.rootPath)
+			}
+		}
 		return m, nil
 
 	case tea.KeyMsg:
