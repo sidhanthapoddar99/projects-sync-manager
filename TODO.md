@@ -37,3 +37,4 @@ Currently PSM only considers `origin` for remote URL matching and sync operation
 - [ ] Reference file location option — store in `~/.config/psm/` instead of scanned dir
 - [ ] Bulk branch sync — sync all branches across all repos (with safety checks)
 - [ ] Filtering/search in the tree view (e.g. only show dirty repos)
+- [ ] Show version number and build date in the app (e.g. in help screen or status bar) — inject via `-ldflags` at build time
