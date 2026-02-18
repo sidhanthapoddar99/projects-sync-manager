@@ -12,6 +12,12 @@ One command — auto-detects your OS/arch, downloads the latest binary, caches i
 
 **Linux / macOS:**
 ```bash
+curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/install.sh | sh
+```
+
+For a custom directory:
+
+```bash
 curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/install.sh | sh -s -- -d ~/projects
 ```
 
@@ -19,6 +25,10 @@ curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manag
 ```powershell
 irm https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/install.ps1 | iex
 ```
+
+
+
+
 
 That's it. The binary is cached in your temp folder (`/tmp/psm-cache/` or `%TEMP%\psm-cache\`) and reused on future runs. A new version is downloaded automatically when a release is published.
 
