@@ -7,19 +7,35 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/sid/psm/internal/git"
 	"github.com/sid/psm/internal/reference"
 	"github.com/sid/psm/internal/scanner"
 )
+
+// pendingCloneInfo stores clone details while waiting for SSH/HTTPS choice.
+type pendingCloneInfo struct {
+	relPath   string // relative path for single clone ("" if cloneAll)
+	remoteURL string // HTTPS URL for single clone
+	cloneAll  bool   // true if this is a "clone all" operation
+	host      string // extracted host for display
+}
+
+// sshCheckDoneMsg is sent after SSH access test completes.
+type sshCheckDoneMsg struct {
+	available bool
+	host      string
+}
 
 // ViewMode represents the current view mode.
 type ViewMode int
 
 const (
-	ViewNormal  ViewMode = iota
-	ViewCompare          // Reference file comparison
-	ViewRefMenu          // Reference file menu overlay
-	ViewHelp             // Help overlay
-	ViewDetail           // Repo detail / interactive right panel
+	ViewNormal      ViewMode = iota
+	ViewCompare              // Reference file comparison
+	ViewRefMenu              // Reference file menu overlay
+	ViewHelp                 // Help overlay
+	ViewDetail               // Repo detail / interactive right panel
+	ViewClonePrompt          // SSH/HTTPS clone choice overlay
 )
 
 // Model is the main bubbletea model.
@@ -47,6 +63,12 @@ type Model struct {
 	detailView *DetailView
 
 	confirmRefreshAll bool // waiting for y/n confirmation on full refresh
+
+	// SSH clone preference (session-wide)
+	cloneSSHAll  bool  // user chose "A" — SSH for all clones this session
+	sshChecked   bool  // have we tested SSH access?
+	sshAvailable bool  // result of SSH access test
+	pendingClone *pendingCloneInfo // clone waiting for user's SSH/HTTPS choice
 }
 
 // NewModel creates a new TUI model.
@@ -210,6 +232,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case sshCheckDoneMsg:
+		m.sshChecked = true
+		m.sshAvailable = msg.available
+		if m.pendingClone == nil {
+			return m, nil
+		}
+		if !msg.available {
+			// SSH not available, clone with HTTPS directly
+			m.statusText = "SSH not available, cloning via HTTPS..."
+			return m, m.executePendingClone(false)
+		}
+		// SSH available — show the prompt
+		m.viewMode = ViewClonePrompt
+		m.statusText = fmt.Sprintf("SSH access to %s available", msg.host)
+		m.statusError = false
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -240,6 +279,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Reference menu
 	if m.viewMode == ViewRefMenu {
 		return m.handleRefMenuKey(msg)
+	}
+
+	// Clone prompt keys
+	if m.viewMode == ViewClonePrompt {
+		return m.handleClonePromptKey(msg)
 	}
 
 	// Compare mode keys
@@ -434,13 +478,116 @@ func (m Model) handleCompareKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "left", "h":
 		m.compareView.navigateLeft()
 	case "enter":
-		return m, m.compareView.handleClone()
+		// Clone single — route through SSH check
+		e := m.compareView.selectedEntry()
+		if e == nil || e.status != "missing" {
+			return m, nil
+		}
+		return m.initiateClone(e.path, e.remoteURL, false)
 	case "a":
-		return m, m.compareView.handleCloneAll()
+		// Clone all — route through SSH check
+		// Find first missing entry to get the host
+		var firstMissing *compareEntry
+		m.compareView.walkEntries(func(entry *compareEntry) {
+			if entry.status == "missing" && firstMissing == nil {
+				firstMissing = entry
+			}
+		})
+		if firstMissing == nil {
+			return m, nil
+		}
+		return m.initiateClone("", firstMissing.remoteURL, true)
 	case "S":
 		return m, m.compareView.handleSyncAll(m.root)
 	case "esc":
 		m.viewMode = ViewNormal
+		return m, nil
+	}
+	return m, nil
+}
+
+// initiateClone starts the clone process, checking SSH availability first.
+func (m Model) initiateClone(relPath, remoteURL string, cloneAll bool) (tea.Model, tea.Cmd) {
+	host := git.ExtractHost(remoteURL)
+	m.pendingClone = &pendingCloneInfo{
+		relPath:   relPath,
+		remoteURL: remoteURL,
+		cloneAll:  cloneAll,
+		host:      host,
+	}
+
+	// If user already chose "SSH for all", skip the prompt
+	if m.cloneSSHAll {
+		m.statusText = "Cloning via SSH..."
+		return m, m.executePendingClone(true)
+	}
+
+	// If we already checked SSH for this session, skip the async check
+	if m.sshChecked {
+		if !m.sshAvailable {
+			m.statusText = "Cloning via HTTPS..."
+			return m, m.executePendingClone(false)
+		}
+		// SSH available, show prompt
+		m.viewMode = ViewClonePrompt
+		return m, nil
+	}
+
+	// First time — run async SSH check
+	m.statusText = fmt.Sprintf("Checking SSH access to %s...", host)
+	return m, func() tea.Msg {
+		available := git.CheckSSHAccess(host)
+		return sshCheckDoneMsg{available: available, host: host}
+	}
+}
+
+// executePendingClone runs the actual clone with SSH or HTTPS.
+func (m Model) executePendingClone(useSSH bool) tea.Cmd {
+	pc := m.pendingClone
+	if pc == nil {
+		return nil
+	}
+
+	if pc.cloneAll {
+		return m.compareView.handleCloneAllWithProtocol(useSSH, m.rootPath)
+	}
+
+	cloneURL := pc.remoteURL
+	if useSSH {
+		cloneURL = git.HTTPSToSSH(pc.remoteURL)
+	}
+	relPath := pc.relPath
+	rootPath := m.rootPath
+	return func() tea.Msg {
+		targetPath := filepath.Join(rootPath, relPath)
+		err := git.CloneRepo(cloneURL, targetPath)
+		return cloneDoneMsg{path: relPath, err: err}
+	}
+}
+
+func (m Model) handleClonePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "a", "A":
+		// SSH for all clones this session
+		m.cloneSSHAll = true
+		m.viewMode = ViewCompare
+		m.statusText = "Cloning via SSH (all future clones will use SSH)..."
+		return m, m.executePendingClone(true)
+	case "y", "Y":
+		// SSH just this one
+		m.viewMode = ViewCompare
+		m.statusText = "Cloning via SSH..."
+		return m, m.executePendingClone(true)
+	case "h", "H":
+		// HTTPS for this one
+		m.viewMode = ViewCompare
+		m.statusText = "Cloning via HTTPS..."
+		return m, m.executePendingClone(false)
+	case "esc":
+		// Cancel
+		m.viewMode = ViewCompare
+		m.pendingClone = nil
+		m.statusText = "Clone cancelled"
 		return m, nil
 	}
 	return m, nil
@@ -506,6 +653,11 @@ func (m Model) View() string {
 	// Reference menu overlay
 	if m.viewMode == ViewRefMenu {
 		return m.renderRefMenu()
+	}
+
+	// Clone prompt overlay
+	if m.viewMode == ViewClonePrompt {
+		return m.renderClonePrompt()
 	}
 
 	// Calculate panel dimensions
@@ -719,6 +871,39 @@ func (m Model) renderRefMenu() string {
 			Width(50).
 			Padding(1, 2).
 			Render(styleHeader.Render(menu)))
+}
+
+func (m Model) renderClonePrompt() string {
+	host := ""
+	action := "Clone"
+	if m.pendingClone != nil {
+		host = m.pendingClone.host
+		if m.pendingClone.cloneAll {
+			action = "Clone all missing repos"
+		} else {
+			action = fmt.Sprintf("Clone %s", m.pendingClone.relPath)
+		}
+	}
+
+	prompt := fmt.Sprintf(`
+  SSH Clone Available
+
+  SSH access to %s detected.
+  %s
+
+  [A] Use SSH for all clones (this session)
+  [Y] Use SSH for this clone only
+  [H] Use HTTPS instead
+
+  [Esc] Cancel
+`, host, action)
+
+	return lipgloss.Place(m.width, m.height,
+		lipgloss.Center, lipgloss.Center,
+		stylePanelBorder.
+			Width(54).
+			Padding(1, 2).
+			Render(styleHeader.Render(prompt)))
 }
 
 // Run starts the TUI application.

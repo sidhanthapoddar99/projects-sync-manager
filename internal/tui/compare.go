@@ -584,40 +584,41 @@ func (cv *CompareView) selectedEntry() *compareEntry {
 	return cv.flatNodes[cv.selectedIdx].Entry
 }
 
-func (cv *CompareView) handleClone() tea.Cmd {
-	e := cv.selectedEntry()
-	if e == nil || e.status != "missing" {
-		return nil
+// walkEntries calls fn for every leaf entry in the compare tree.
+func (cv *CompareView) walkEntries(fn func(entry *compareEntry)) {
+	var walk func(n *compareTreeNode)
+	walk = func(n *compareTreeNode) {
+		if n.Entry != nil {
+			fn(n.Entry)
+		}
+		for _, c := range n.Children {
+			walk(c)
+		}
 	}
-	targetPath := filepath.Join(cv.rootPath, e.path)
-	return func() tea.Msg {
-		err := git.CloneRepo(e.remoteURL, targetPath)
-		return cloneDoneMsg{path: e.path, err: err}
-	}
+	walk(cv.treeRoot)
 }
 
-func (cv *CompareView) handleCloneAll() tea.Cmd {
+// handleCloneAllWithProtocol clones all missing repos using SSH or HTTPS.
+func (cv *CompareView) handleCloneAllWithProtocol(useSSH bool, rootPath string) tea.Cmd {
 	var missing []compareEntry
-	var collectMissing func(node *compareTreeNode)
-	collectMissing = func(node *compareTreeNode) {
-		if node.Entry != nil && node.Entry.status == "missing" {
-			missing = append(missing, *node.Entry)
+	cv.walkEntries(func(entry *compareEntry) {
+		if entry.status == "missing" {
+			missing = append(missing, *entry)
 		}
-		for _, c := range node.Children {
-			collectMissing(c)
-		}
-	}
-	collectMissing(cv.treeRoot)
+	})
 
 	if len(missing) == 0 {
 		return nil
 	}
-	rootPath := cv.rootPath
 	return func() tea.Msg {
 		cloned, failed := 0, 0
 		for _, e := range missing {
+			cloneURL := e.remoteURL
+			if useSSH {
+				cloneURL = git.HTTPSToSSH(e.remoteURL)
+			}
 			targetPath := filepath.Join(rootPath, e.path)
-			err := git.CloneRepo(e.remoteURL, targetPath)
+			err := git.CloneRepo(cloneURL, targetPath)
 			if err != nil {
 				failed++
 			} else {

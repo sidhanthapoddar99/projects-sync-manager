@@ -70,6 +70,57 @@ func SSHToHTTPS(url string) string {
 	return url
 }
 
+// HTTPSToSSH converts a git HTTPS URL to SSH format.
+// e.g. https://github.com/user/repo -> git@github.com:user/repo.git
+func HTTPSToSSH(url string) string {
+	url = strings.TrimSuffix(url, "/")
+	url = strings.TrimSuffix(url, ".git")
+
+	// Match https://host/user/repo
+	for _, prefix := range []string{"https://", "http://"} {
+		if strings.HasPrefix(url, prefix) {
+			rest := strings.TrimPrefix(url, prefix)
+			parts := strings.SplitN(rest, "/", 2)
+			if len(parts) == 2 {
+				return fmt.Sprintf("git@%s:%s.git", parts[0], parts[1])
+			}
+		}
+	}
+	return url
+}
+
+// ExtractHost extracts the hostname from a git URL (HTTPS or SSH).
+func ExtractHost(url string) string {
+	if matches := sshURLPattern.FindStringSubmatch(url); matches != nil {
+		return matches[1]
+	}
+	for _, prefix := range []string{"https://", "http://"} {
+		if strings.HasPrefix(url, prefix) {
+			rest := strings.TrimPrefix(url, prefix)
+			parts := strings.SplitN(rest, "/", 2)
+			if len(parts) >= 1 {
+				return parts[0]
+			}
+		}
+	}
+	return ""
+}
+
+// CheckSSHAccess tests if SSH access is available for a given host.
+// Returns true if `ssh -T git@host` succeeds (exit code 0 or 1 — GitHub returns 1 with "Hi user!").
+func CheckSSHAccess(host string) bool {
+	cmd := exec.Command("ssh", "-T", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=5", fmt.Sprintf("git@%s", host))
+	err := cmd.Run()
+	if err == nil {
+		return true
+	}
+	// GitHub/GitLab return exit code 1 with a greeting — that still means SSH works
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return exitErr.ExitCode() == 1
+	}
+	return false
+}
+
 // runGit executes a git command in the given directory and returns stdout.
 // It passes -c safe.directory=* to handle copied/moved repositories that
 // git considers "unsafe" due to ownership mismatch.
