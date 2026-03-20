@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -11,6 +12,22 @@ import (
 	"github.com/sid/psm/internal/reference"
 	"github.com/sid/psm/internal/scanner"
 )
+
+// pendingRenameInfo stores details for a folder rename confirmation.
+type pendingRenameInfo struct {
+	node    *scanner.TreeNode
+	oldPath string
+	newPath string
+	newName string
+}
+
+// renameDoneMsg is sent after a folder rename completes.
+type renameDoneMsg struct {
+	node    *scanner.TreeNode
+	oldPath string
+	newPath string
+	err     error
+}
 
 // pendingCloneInfo stores clone details while waiting for SSH/HTTPS choice.
 type pendingCloneInfo struct {
@@ -38,6 +55,7 @@ const (
 	ViewClonePrompt          // SSH/HTTPS clone choice overlay
 	ViewFilter               // Filter panel overlay
 	ViewCommand              // Command palette overlay
+	ViewRenameConfirm        // Rename folder confirmation
 )
 
 // Model is the main bubbletea model.
@@ -72,6 +90,9 @@ type Model struct {
 
 	// Command palette
 	commandPalette *CommandPalette
+
+	// Rename confirmation
+	pendingRename *pendingRenameInfo
 
 	// SSH clone preference (session-wide)
 	cloneSSHAll  bool  // user chose "A" — SSH for all clones this session
@@ -242,6 +263,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case renameRequestMsg:
+		node := msg.node
+		if node.Status != nil && node.Status.NameMismatch() {
+			newName := node.Status.RepoName
+			oldPath := node.Path
+			newPath := filepath.Join(filepath.Dir(oldPath), newName)
+			m.pendingRename = &pendingRenameInfo{
+				node:    node,
+				oldPath: oldPath,
+				newPath: newPath,
+				newName: newName,
+			}
+			m.viewMode = ViewRenameConfirm
+		}
+		return m, nil
+
+	case renameDoneMsg:
+		if msg.err != nil {
+			m.statusText = fmt.Sprintf("Rename failed: %v", msg.err)
+			m.statusError = true
+		} else {
+			// Update the node's path and name in the tree
+			msg.node.Path = msg.newPath
+			msg.node.Name = filepath.Base(msg.newPath)
+			// Refresh status since path changed
+			scanner.RefreshNode(msg.node)
+			m.rebuildFlatList()
+			m.statusText = fmt.Sprintf("Renamed to %s", filepath.Base(msg.newPath))
+			m.statusError = false
+		}
+		return m, nil
+
 	case sshCheckDoneMsg:
 		m.sshChecked = true
 		m.sshAvailable = msg.available
@@ -294,6 +347,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Clone prompt keys
 	if m.viewMode == ViewClonePrompt {
 		return m.handleClonePromptKey(msg)
+	}
+
+	// Rename confirmation keys
+	if m.viewMode == ViewRenameConfirm {
+		return m.handleRenameConfirmKey(msg)
 	}
 
 	// Filter panel keys
@@ -409,6 +467,27 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleActionKey(handleOpenExplorer)
 	case "b":
 		return m.handleBrowserKey()
+	case "n":
+		// Rename folder to match repo name
+		if m.selectedIdx < len(m.flatNodes) {
+			node := m.flatNodes[m.selectedIdx]
+			if node.IsGitRepo && node.Status != nil && node.Status.NameMismatch() {
+				newName := node.Status.RepoName
+				oldPath := node.Path
+				newPath := filepath.Join(filepath.Dir(oldPath), newName)
+				m.pendingRename = &pendingRenameInfo{
+					node:    node,
+					oldPath: oldPath,
+					newPath: newPath,
+					newName: newName,
+				}
+				m.viewMode = ViewRenameConfirm
+				return m, nil
+			}
+			m.statusText = "No name mismatch to fix"
+			m.statusError = true
+			return m, nil
+		}
 	case "F":
 		m.viewMode = ViewFilter
 		return m, nil
@@ -483,8 +562,12 @@ func (m Model) handleRefMenuKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		result := reference.Compare(ref, m.root)
 		m.compareView = newCompareView(result, m.rootPath)
 		m.viewMode = ViewCompare
-		m.statusText = fmt.Sprintf("Loaded reference: %d matched, %d missing, %d extra",
+		statusParts := fmt.Sprintf("Loaded reference: %d matched, %d missing, %d extra",
 			len(result.Matched), len(result.Missing), len(result.Extra))
+		if len(result.Relocated) > 0 {
+			statusParts += fmt.Sprintf(", %d relocated", len(result.Relocated))
+		}
+		m.statusText = statusParts
 		m.statusError = false
 		return m, nil
 	case "esc", "q":
@@ -620,6 +703,28 @@ func (m Model) handleClonePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) handleRenameConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		pr := m.pendingRename
+		m.viewMode = ViewNormal
+		m.pendingRename = nil
+		if pr != nil {
+			m.statusText = fmt.Sprintf("Renaming %s → %s...", filepath.Base(pr.oldPath), pr.newName)
+			return m, func() tea.Msg {
+				err := os.Rename(pr.oldPath, pr.newPath)
+				return renameDoneMsg{node: pr.node, oldPath: pr.oldPath, newPath: pr.newPath, err: err}
+			}
+		}
+	default:
+		m.viewMode = ViewNormal
+		m.pendingRename = nil
+		m.statusText = "Rename cancelled"
+		m.statusError = false
+	}
+	return m, nil
+}
+
 func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	allFilters := AllFilterTypes()
 	switch msg.String() {
@@ -744,6 +849,11 @@ func (m Model) View() string {
 	// Command palette overlay
 	if m.viewMode == ViewCommand && m.commandPalette != nil {
 		return m.commandPalette.render(m.width, m.height)
+	}
+
+	// Rename confirmation overlay
+	if m.viewMode == ViewRenameConfirm && m.pendingRename != nil {
+		return m.renderRenameConfirm()
 	}
 
 	// Clone prompt overlay
@@ -1000,6 +1110,29 @@ func (m Model) renderClonePrompt() string {
 		lipgloss.Center, lipgloss.Center,
 		stylePanelBorder.
 			Width(54).
+			Padding(1, 2).
+			Render(styleHeader.Render(prompt)))
+}
+
+func (m Model) renderRenameConfirm() string {
+	pr := m.pendingRename
+	prompt := fmt.Sprintf(`
+  Rename Folder
+
+  Current:  %s
+  New name: %s
+
+  The folder will be renamed to match
+  the remote repository name.
+
+  [Y] Confirm rename
+  [Any other key] Cancel
+`, filepath.Base(pr.oldPath), pr.newName)
+
+	return lipgloss.Place(m.width, m.height,
+		lipgloss.Center, lipgloss.Center,
+		stylePanelBorder.
+			Width(50).
 			Padding(1, 2).
 			Render(styleHeader.Render(prompt)))
 }

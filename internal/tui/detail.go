@@ -43,6 +43,11 @@ type syncBranchDoneMsg struct {
 	node   *scanner.TreeNode
 }
 
+// renameRequestMsg requests the app to show the rename confirmation.
+type renameRequestMsg struct {
+	node *scanner.TreeNode
+}
+
 func newDetailView(node *scanner.TreeNode) *DetailView {
 	dv := &DetailView{
 		node:  node,
@@ -102,6 +107,13 @@ func (dv *DetailView) rebuildActions() {
 	// Repo-wide sync (current branch)
 	if s.HasRemote {
 		dv.actions = append(dv.actions, detailAction{"Sync current branch (S)", "sync-repo"})
+	}
+
+	// Rename if name mismatch
+	if s.NameMismatch() {
+		dv.actions = append(dv.actions, detailAction{
+			fmt.Sprintf("Rename folder to %s", s.RepoName), "rename",
+		})
 	}
 
 	dv.actions = append(dv.actions, detailAction{"Open in VS Code", "code"})
@@ -213,6 +225,11 @@ func (dv *DetailView) executeAction() tea.Cmd {
 		}
 	case "sync-repo":
 		return handleSync(dv.node)
+	case "rename":
+		node := dv.node
+		return func() tea.Msg {
+			return renameRequestMsg{node: node}
+		}
 	case "code":
 		return handleOpenVSCode(dv.node)
 	case "explorer":

@@ -33,11 +33,12 @@ type compareTreeNode struct {
 }
 
 type compareEntry struct {
-	indicator string // [==], [++], [--]
-	path      string
-	remoteURL string
-	status    string // "matched", "missing", "extra"
-	node      *scanner.TreeNode
+	indicator  string // [==], [++], [--], [⇄]
+	path       string // reference path (expected)
+	actualPath string // actual local path (differs if relocated)
+	remoteURL  string
+	status     string // "matched", "missing", "extra", "relocated"
+	node       *scanner.TreeNode
 }
 
 type cloneDoneMsg struct {
@@ -89,6 +90,7 @@ func (n *compareTreeNode) aggregateStatus() string {
 	hasMissing := false
 	hasMatched := false
 	hasExtra := false
+	hasRelocated := false
 	var walk func(node *compareTreeNode)
 	walk = func(node *compareTreeNode) {
 		if node.Entry != nil {
@@ -99,6 +101,8 @@ func (n *compareTreeNode) aggregateStatus() string {
 				hasMissing = true
 			case "extra":
 				hasExtra = true
+			case "relocated":
+				hasRelocated = true
 			}
 			return
 		}
@@ -108,14 +112,26 @@ func (n *compareTreeNode) aggregateStatus() string {
 	}
 	walk(n)
 
-	if hasMissing && !hasMatched && !hasExtra {
-		return "missing"
+	count := 0
+	result := "mixed"
+	if hasMissing {
+		count++
+		result = "missing"
 	}
-	if hasMatched && !hasMissing && !hasExtra {
-		return "matched"
+	if hasMatched {
+		count++
+		result = "matched"
 	}
-	if hasExtra && !hasMatched && !hasMissing {
-		return "extra"
+	if hasExtra {
+		count++
+		result = "extra"
+	}
+	if hasRelocated {
+		count++
+		result = "relocated"
+	}
+	if count == 1 {
+		return result
 	}
 	return "mixed"
 }
@@ -130,11 +146,12 @@ func newCompareView(result *reference.CompareResult, rootPath string) *CompareVi
 	var entries []compareEntry
 	for _, e := range result.Matched {
 		entries = append(entries, compareEntry{
-			indicator: "[==]",
-			path:      e.RelativePath,
-			remoteURL: e.RemoteURL,
-			status:    "matched",
-			node:      e.LocalNode,
+			indicator:  "[==]",
+			path:       e.RelativePath,
+			actualPath: e.ActualPath,
+			remoteURL:  e.RemoteURL,
+			status:     "matched",
+			node:       e.LocalNode,
 		})
 	}
 	for _, e := range result.Missing {
@@ -147,11 +164,22 @@ func newCompareView(result *reference.CompareResult, rootPath string) *CompareVi
 	}
 	for _, e := range result.Extra {
 		entries = append(entries, compareEntry{
-			indicator: "[++]",
-			path:      e.RelativePath,
-			remoteURL: e.RemoteURL,
-			status:    "extra",
-			node:      e.LocalNode,
+			indicator:  "[++]",
+			path:       e.RelativePath,
+			actualPath: e.ActualPath,
+			remoteURL:  e.RemoteURL,
+			status:     "extra",
+			node:       e.LocalNode,
+		})
+	}
+	for _, e := range result.Relocated {
+		entries = append(entries, compareEntry{
+			indicator:  "[⇄]",
+			path:       e.RelativePath,
+			actualPath: e.ActualPath,
+			remoteURL:  e.RemoteURL,
+			status:     "relocated",
+			node:       e.LocalNode,
 		})
 	}
 
@@ -355,6 +383,9 @@ func (cv *CompareView) renderLeft(width, height int) string {
 
 	summary := fmt.Sprintf("  Matched: %d  Missing: %d  Extra: %d",
 		len(cv.result.Matched), len(cv.result.Missing), len(cv.result.Extra))
+	if len(cv.result.Relocated) > 0 {
+		summary += fmt.Sprintf("  Relocated: %d", len(cv.result.Relocated))
+	}
 	lines = append(lines, styleLabel.Render(summary))
 	lines = append(lines, styleTreePrefix.Render("  "+strings.Repeat("─", width-4)))
 
@@ -406,6 +437,8 @@ func (cv *CompareView) renderCompareTreeLine(node *compareTreeNode, selected boo
 			indicator = styleMissingIndicator.Render(" [--]")
 		case "extra":
 			indicator = styleExtraIndicator.Render(" [++]")
+		case "relocated":
+			indicator = styleRelocatedIndicator.Render(" [⇄]")
 		}
 		line += indicator
 	}
@@ -422,6 +455,8 @@ func (cv *CompareView) getCompareNameStyle(node *compareTreeNode) lipgloss.Style
 		return styleGitDirty
 	case "extra":
 		return styleGitPartial
+	case "relocated":
+		return styleRelocatedIndicator
 	case "mixed":
 		return styleGitNoRemote
 	default:
@@ -496,6 +531,15 @@ func (cv *CompareView) renderRight(width, height int) string {
 		lines = append(lines, styleAction.Render("  [A] Clone all missing repositories"))
 	case "extra":
 		lines = append(lines, styleGitPartial.Render("  + Extra (not in reference file)"))
+	case "relocated":
+		lines = append(lines, styleRelocatedIndicator.Render("  ⇄ Relocated"))
+		lines = append(lines, "")
+		lines = append(lines, styleLabel.Render("  Expected: ")+styleValue.Render(e.path))
+		lines = append(lines, styleLabel.Render("  Found at: ")+styleInfo.Render(e.actualPath))
+		if e.node != nil && e.node.Status != nil {
+			lines = append(lines, "")
+			lines = append(lines, styleLabel.Render("  State: ")+renderSyncStateBadge(e.node.Status.SyncState()))
+		}
 	}
 
 	return strings.Join(lines, "\n")
@@ -507,7 +551,7 @@ func (cv *CompareView) renderDirectorySummary(node *compareTreeNode, width int) 
 	lines = append(lines, "")
 
 	// Count children by status
-	matched, missing, extra := 0, 0, 0
+	matched, missing, extra, relocated := 0, 0, 0, 0
 	var countAll func(n *compareTreeNode)
 	countAll = func(n *compareTreeNode) {
 		if n.Entry != nil {
@@ -518,6 +562,8 @@ func (cv *CompareView) renderDirectorySummary(node *compareTreeNode, width int) 
 				missing++
 			case "extra":
 				extra++
+			case "relocated":
+				relocated++
 			}
 			return
 		}
@@ -537,6 +583,9 @@ func (cv *CompareView) renderDirectorySummary(node *compareTreeNode, width int) 
 	}
 	if extra > 0 {
 		lines = append(lines, styleGitPartial.Render(fmt.Sprintf("  + %d extra", extra)))
+	}
+	if relocated > 0 {
+		lines = append(lines, styleRelocatedIndicator.Render(fmt.Sprintf("  ⇄ %d relocated", relocated)))
 	}
 
 	return strings.Join(lines, "\n")

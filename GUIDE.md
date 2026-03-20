@@ -134,6 +134,10 @@ some-folder/    ○                       # not a git repo (grey)
 
 The `≠` indicator appears when your local folder name doesn't match the repository name from the remote URL. For example, if you cloned `github.com/user/my-app` into a folder called `app/`, the `≠` will show. This helps identify repos that may have been renamed or cloned into non-standard directories.
 
+### Renaming to Match (`n`)
+
+Press `n` on a repo with the `≠` indicator to rename the folder to match the remote repo name. PSM will show a confirmation prompt before renaming. You can also use this from the detail panel (`Enter` on the repo, then select "Rename folder to ...").
+
 ---
 
 ## Syncing Repos
@@ -283,6 +287,14 @@ Press `/` and type `filter dirty` to toggle the dirty filter without opening the
 
 Reference files capture a snapshot of your project structure — which repos exist and their remote URLs. Use them to replicate your setup on another machine.
 
+### How Matching Works
+
+Comparison is **URL-based**, not path-based. PSM identifies repos by their remote URL (normalized to HTTPS, case-insensitive). This means:
+
+- If you moved a repo from `01_Web/my-app/` to `02_Tools/my-app/`, PSM recognizes it as the same repo (same remote URL) and shows it as **relocated** rather than missing + extra.
+- If you renamed a folder but kept the same remote, it's still matched.
+- Folder names and paths are display information — the remote URL is the identity.
+
 ### Generate
 
 Press `f` then `g` (or use the command palette: `Reference: Generate`).
@@ -295,11 +307,14 @@ Press `f` then `l` (or use the command palette: `Reference: Load & Compare`).
 
 PSM loads the reference file and compares it against the current directory tree:
 
-| Status | Color | Meaning |
-|--------|-------|---------|
-| Matched | Green | Repo exists locally at the expected path |
-| Missing | Red | Repo is in the reference but not found locally |
-| Extra | Yellow | Repo exists locally but not in the reference |
+| Status | Symbol | Color | Meaning |
+|--------|--------|-------|---------|
+| Matched | `[==]` | Green | Repo found locally at the expected path |
+| Missing | `[--]` | Red | Repo in reference but not found locally |
+| Extra | `[++]` | Yellow | Repo exists locally but not in reference |
+| Relocated | `[⇄]` | Purple | Repo found locally but at a different path |
+
+For **relocated** repos, the right panel shows both the expected path (from reference) and the actual path (where it was found).
 
 ### Compare View Navigation
 
@@ -400,6 +415,7 @@ Use filters to focus:
 | `c` | Open in VS Code |
 | `e` | Open in file explorer |
 | `b` | Open in browser |
+| `n` | Rename folder to match repo name |
 | `?` | Help |
 | `q` | Quit |
 

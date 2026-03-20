@@ -42,9 +42,10 @@ var (
 				BorderForeground(colorBorder)
 
 	// Compare indicators
-	styleMatchedIndicator = lipgloss.NewStyle().Foreground(colorGreen)
-	styleMissingIndicator = lipgloss.NewStyle().Foreground(colorRed)
-	styleExtraIndicator   = lipgloss.NewStyle().Foreground(colorYellow)
+	styleMatchedIndicator   = lipgloss.NewStyle().Foreground(colorGreen)
+	styleMissingIndicator   = lipgloss.NewStyle().Foreground(colorRed)
+	styleExtraIndicator     = lipgloss.NewStyle().Foreground(colorYellow)
+	styleRelocatedIndicator = lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa")) // purple
 
 	// Messages
 	styleSuccess = lipgloss.NewStyle().Foreground(colorGreen)

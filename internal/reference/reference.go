@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sid/psm/internal/git"
@@ -12,10 +13,10 @@ import (
 
 // RefFile is the portable reference file format.
 type RefFile struct {
-	Version      int         `json:"version"`
-	CreatedAt    time.Time   `json:"created_at"`
-	BasePath     string      `json:"base_path"`
-	Repositories []RefRepo   `json:"repositories"`
+	Version      int       `json:"version"`
+	CreatedAt    time.Time `json:"created_at"`
+	BasePath     string    `json:"base_path"`
+	Repositories []RefRepo `json:"repositories"`
 }
 
 // RefRepo is a single repository entry in a reference file.
@@ -26,16 +27,19 @@ type RefRepo struct {
 
 // CompareResult holds the result of comparing a reference file against local state.
 type CompareResult struct {
-	Matched []*CompareEntry
-	Missing []*CompareEntry // in reference but not local
-	Extra   []*CompareEntry // local but not in reference
+	Matched   []*CompareEntry
+	Missing   []*CompareEntry // in reference but not local
+	Extra     []*CompareEntry // local but not in reference
+	Relocated []*CompareEntry // in reference, found locally but at different path
 }
 
 // CompareEntry is a single entry in comparison results.
 type CompareEntry struct {
-	RelativePath string
-	RemoteURL    string
-	LocalNode    *scanner.TreeNode // nil if missing locally
+	RelativePath string             // expected path (from reference)
+	ActualPath   string             // actual local path (differs from RelativePath if relocated)
+	RemoteURL    string             // normalized HTTPS URL
+	LocalNode    *scanner.TreeNode  // nil if missing locally
+	Relocated    bool               // true if found at a different path
 }
 
 // Generate creates a reference file from a scanned tree.
@@ -85,17 +89,32 @@ func Load(filePath string) (*RefFile, error) {
 	return &ref, nil
 }
 
+// normalizeURL strips trailing slashes and .git suffix for comparison.
+func normalizeURL(url string) string {
+	url = strings.TrimSuffix(url, "/")
+	url = strings.TrimSuffix(url, ".git")
+	url = strings.ToLower(url)
+	return url
+}
+
 // Compare compares a reference file against a scanned tree.
+// Matching is done by remote URL first (the repo identity), not by path.
+// If a repo is found locally but at a different relative path, it is marked as relocated.
 func Compare(ref *RefFile, root *scanner.TreeNode) *CompareResult {
 	result := &CompareResult{}
 
-	// Build map of local repos by relative path
-	localRepos := make(map[string]*scanner.TreeNode)
+	// Build map of local repos by normalized URL → (relPath, node)
+	type localRepo struct {
+		relPath string
+		node    *scanner.TreeNode
+	}
+	localByURL := make(map[string]*localRepo)
 	var collect func(node *scanner.TreeNode)
 	collect = func(node *scanner.TreeNode) {
-		if node.IsGitRepo {
+		if node.IsGitRepo && node.Status != nil && node.Status.HasRemote {
 			relPath, _ := filepath.Rel(root.Path, node.Path)
-			localRepos[relPath] = node
+			normURL := normalizeURL(git.SSHToHTTPS(node.Status.RemoteURL))
+			localByURL[normURL] = &localRepo{relPath: relPath, node: node}
 		}
 		for _, c := range node.Children {
 			collect(c)
@@ -103,17 +122,36 @@ func Compare(ref *RefFile, root *scanner.TreeNode) *CompareResult {
 	}
 	collect(root)
 
-	// Check each ref entry against local
-	refPaths := make(map[string]bool)
+	// Track which local URLs have been matched to a ref entry
+	matchedURLs := make(map[string]bool)
+
+	// Check each ref entry against local repos by URL
 	for _, repo := range ref.Repositories {
-		refPaths[repo.RelativePath] = true
-		if localNode, exists := localRepos[repo.RelativePath]; exists {
-			result.Matched = append(result.Matched, &CompareEntry{
-				RelativePath: repo.RelativePath,
-				RemoteURL:    repo.RemoteURL,
-				LocalNode:    localNode,
-			})
+		refNormURL := normalizeURL(repo.RemoteURL)
+
+		if local, exists := localByURL[refNormURL]; exists {
+			matchedURLs[refNormURL] = true
+
+			if local.relPath == repo.RelativePath {
+				// Same URL, same path → matched
+				result.Matched = append(result.Matched, &CompareEntry{
+					RelativePath: repo.RelativePath,
+					ActualPath:   local.relPath,
+					RemoteURL:    repo.RemoteURL,
+					LocalNode:    local.node,
+				})
+			} else {
+				// Same URL, different path → relocated
+				result.Relocated = append(result.Relocated, &CompareEntry{
+					RelativePath: repo.RelativePath,
+					ActualPath:   local.relPath,
+					RemoteURL:    repo.RemoteURL,
+					LocalNode:    local.node,
+					Relocated:    true,
+				})
+			}
 		} else {
+			// Not found locally by URL → missing
 			result.Missing = append(result.Missing, &CompareEntry{
 				RelativePath: repo.RelativePath,
 				RemoteURL:    repo.RemoteURL,
@@ -121,17 +159,18 @@ func Compare(ref *RefFile, root *scanner.TreeNode) *CompareResult {
 		}
 	}
 
-	// Find extra local repos not in reference
-	for relPath, node := range localRepos {
-		if !refPaths[relPath] {
+	// Find extra local repos not matched to any ref entry
+	for normURL, local := range localByURL {
+		if !matchedURLs[normURL] {
 			url := ""
-			if node.Status != nil {
-				url = node.Status.HTTPSURL
+			if local.node.Status != nil {
+				url = local.node.Status.HTTPSURL
 			}
 			result.Extra = append(result.Extra, &CompareEntry{
-				RelativePath: relPath,
+				RelativePath: local.relPath,
+				ActualPath:   local.relPath,
 				RemoteURL:    url,
-				LocalNode:    node,
+				LocalNode:    local.node,
 			})
 		}
 	}

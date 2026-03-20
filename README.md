@@ -103,7 +103,11 @@ Interactive panel with per-branch sync control. Switch between branches and acti
 
 ### Reference Files (`f`)
 
-Generate a portable snapshot of your project structure. Load it on another machine to see what's missing, clone repos individually or in bulk, and sync matched repos.
+Generate a portable snapshot of your project structure. Load it on another machine to see what's missing, clone repos individually or in bulk, and sync matched repos. Comparison is **URL-based** — repos are matched by remote URL, not folder path. Repos moved to different directories are detected as **relocated** (`⇄`) instead of missing + extra.
+
+### Rename to Match (`n`)
+
+When a folder name doesn't match the remote repo name (`≠` indicator), press `n` to rename the folder with confirmation.
 
 ### Conservative Sync (`s`)
 
@@ -127,6 +131,7 @@ Pull or push with safety checks — blocks on uncommitted changes and diverged b
 | `c` | Open in VS Code |
 | `e` | Open in file explorer |
 | `b` | Open in browser |
+| `n` | Rename folder to match repo name |
 | `?` | Help |
 | `q` | Quit |
 
