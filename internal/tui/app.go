@@ -13,6 +13,13 @@ import (
 	"github.com/sid/psm/internal/scanner"
 )
 
+// busyProgressMsg carries progress updates during busy operations.
+type busyProgressMsg struct {
+	done    int
+	total   int
+	current string
+}
+
 // pendingRenameInfo stores details for a folder rename confirmation.
 type pendingRenameInfo struct {
 	node    *scanner.TreeNode
@@ -56,6 +63,7 @@ const (
 	ViewFilter               // Filter panel overlay
 	ViewCommand              // Command palette overlay
 	ViewRenameConfirm        // Rename folder confirmation
+	ViewBusy                 // Blocking progress overlay
 )
 
 // Model is the main bubbletea model.
@@ -94,6 +102,13 @@ type Model struct {
 	// Rename confirmation
 	pendingRename *pendingRenameInfo
 
+	// Busy overlay
+	busyTitle    string // e.g. "Refreshing All Repos" or "Syncing"
+	busyDone     int
+	busyTotal    int
+	busyCurrent  string // name of repo currently being processed
+	busyCh       chan scanner.ScanProgress
+
 	// SSH clone preference (session-wide)
 	cloneSSHAll  bool  // user chose "A" — SSH for all clones this session
 	sshChecked   bool  // have we tested SSH access?
@@ -130,6 +145,17 @@ func waitForProgress(ch chan scanner.ScanProgress) tea.Cmd {
 			return nil
 		}
 		return scanProgressMsg{progress: p}
+	}
+}
+
+// waitForBusyProgress blocks on the busy channel and returns progress messages.
+func waitForBusyProgress(ch chan scanner.ScanProgress) tea.Cmd {
+	return func() tea.Msg {
+		p, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return busyProgressMsg{done: p.ReposFetched, total: p.ReposTotal, current: p.CurrentDir}
 	}
 }
 
@@ -177,12 +203,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rebuildFlatList()
 		return m, nil
 
+	case busyProgressMsg:
+		m.busyDone = msg.done
+		m.busyTotal = msg.total
+		m.busyCurrent = msg.current
+		if m.busyCh != nil {
+			return m, waitForBusyProgress(m.busyCh)
+		}
+		return m, nil
+
 	case refreshDoneMsg:
 		m.root = msg.root
 		m.rebuildFlatList()
 		m.statusText = "Refreshed"
 		m.statusError = false
 		m.loading = false
+		m.viewMode = ViewNormal
+		m.busyCh = nil
 		return m, nil
 
 	case refreshSingleDoneMsg:
@@ -192,6 +229,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rebuildFlatList()
 		m.statusText = fmt.Sprintf("Refreshed %s", msg.node.Name)
 		m.statusError = false
+		if m.viewMode == ViewBusy {
+			m.viewMode = ViewNormal
+			m.busyCh = nil
+		}
 		return m, nil
 
 	case syncBranchDoneMsg:
@@ -223,6 +264,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detailView.rebuild()
 		}
 		m.rebuildFlatList()
+		if m.viewMode == ViewBusy {
+			m.viewMode = ViewNormal
+			m.busyCh = nil
+		}
 		return m, nil
 
 	case statusMsg:
@@ -333,6 +378,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Busy overlay - block all input
+	if m.viewMode == ViewBusy {
+		return m, nil
+	}
+
 	// Help overlay - any key dismisses
 	if m.viewMode == ViewHelp {
 		m.viewMode = ViewNormal
@@ -379,9 +429,25 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "y", "Y":
 			m.confirmRefreshAll = false
-			m.loading = true
-			m.statusText = "Refreshing all repos..."
-			return m, handleRefresh(m.root)
+			m.viewMode = ViewBusy
+			m.busyTitle = "Refreshing All Repos"
+			m.busyDone = 0
+			m.busyTotal = 0
+			m.busyCurrent = ""
+			ch := make(chan scanner.ScanProgress, 100)
+			m.busyCh = ch
+			root := m.root
+			refreshCmd := func() tea.Msg {
+				scanner.RefreshAllWithProgress(root, func(p scanner.ScanProgress) {
+					select {
+					case ch <- p:
+					default:
+					}
+				})
+				close(ch)
+				return refreshDoneMsg{root: root}
+			}
+			return m, tea.Batch(refreshCmd, waitForBusyProgress(ch))
 		default:
 			m.confirmRefreshAll = false
 			m.statusText = "Refresh all cancelled"
@@ -443,7 +509,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.selectedIdx < len(m.flatNodes) {
 			node := m.flatNodes[m.selectedIdx]
 			if node.IsGitRepo {
-				m.statusText = fmt.Sprintf("Refreshing %s...", node.Name)
+				m.viewMode = ViewBusy
+				m.busyTitle = "Refreshing"
+				m.busyDone = 0
+				m.busyTotal = 1
+				m.busyCurrent = node.Name
+				m.busyCh = nil
 				return m, func() tea.Msg {
 					scanner.RefreshNode(node)
 					return refreshSingleDoneMsg{node: node}
@@ -510,7 +581,12 @@ func (m Model) handleSyncKey() (tea.Model, tea.Cmd) {
 		m.statusError = true
 		return m, nil
 	}
-	m.statusText = "Syncing..."
+	m.viewMode = ViewBusy
+	m.busyTitle = "Syncing"
+	m.busyDone = 0
+	m.busyTotal = 1
+	m.busyCurrent = node.Name
+	m.busyCh = nil
 	return m, handleSync(node)
 }
 
@@ -831,6 +907,11 @@ func (m Model) View() string {
 		return m.renderLoading()
 	}
 
+	// Busy overlay
+	if m.viewMode == ViewBusy {
+		return m.renderBusyOverlay()
+	}
+
 	// Help overlay
 	if m.viewMode == ViewHelp {
 		return m.renderHelp()
@@ -1112,6 +1193,50 @@ func (m Model) renderClonePrompt() string {
 			Width(54).
 			Padding(1, 2).
 			Render(styleHeader.Render(prompt)))
+}
+
+func (m Model) renderBusyOverlay() string {
+	boxWidth := 46
+
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines, styleHeader.Render("  "+m.busyTitle))
+	lines = append(lines, "")
+
+	if m.busyTotal > 0 {
+		// Progress bar
+		barWidth := boxWidth - 8
+		if barWidth < 10 {
+			barWidth = 10
+		}
+		progress := float64(m.busyDone) / float64(m.busyTotal)
+		filled := int(progress * float64(barWidth))
+		if filled > barWidth {
+			filled = barWidth
+		}
+		empty := barWidth - filled
+
+		bar := styleGitSynced.Render(strings.Repeat("█", filled)) +
+			styleNonGit.Render(strings.Repeat("░", empty))
+		lines = append(lines, "  "+bar)
+		lines = append(lines, "")
+		lines = append(lines, styleLabel.Render(fmt.Sprintf("  %d / %d repos", m.busyDone, m.busyTotal)))
+	} else {
+		lines = append(lines, styleLabel.Render("  Working..."))
+	}
+
+	if m.busyCurrent != "" {
+		lines = append(lines, styleLabel.Render("  Current: ")+styleValue.Render(m.busyCurrent))
+	}
+	lines = append(lines, "")
+
+	content := strings.Join(lines, "\n")
+	return lipgloss.Place(m.width, m.height,
+		lipgloss.Center, lipgloss.Center,
+		stylePanelBorder.
+			Width(boxWidth).
+			Padding(1, 2).
+			Render(content))
 }
 
 func (m Model) renderRenameConfirm() string {

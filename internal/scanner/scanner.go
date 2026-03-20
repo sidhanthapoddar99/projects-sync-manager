@@ -347,8 +347,16 @@ func RefreshNode(node *TreeNode) {
 
 // RefreshAll refreshes all git statuses concurrently (with fetch).
 func RefreshAll(root *TreeNode) {
+	RefreshAllWithProgress(root, nil)
+}
+
+// RefreshAllWithProgress refreshes all git statuses concurrently, reporting progress.
+func RefreshAllWithProgress(root *TreeNode, onProgress ProgressFunc) {
 	var repos []*TreeNode
 	collectGitRepos(root, &repos)
+
+	total := len(repos)
+	var done int64
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, maxWorkers)
@@ -360,6 +368,15 @@ func RefreshAll(root *TreeNode) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			r.Status = git.GetRepoStatusFresh(r.Path)
+			completed := int(atomic.AddInt64(&done, 1))
+			if onProgress != nil {
+				onProgress(ScanProgress{
+					Phase:        "refresh",
+					ReposFetched: completed,
+					ReposTotal:   total,
+					CurrentDir:   r.Name,
+				})
+			}
 		}(repo)
 	}
 
