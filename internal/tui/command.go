@@ -134,6 +134,26 @@ func buildCommands() []Command {
 			}
 			return *m, nil
 		}},
+		{Name: "Network: Start Server", Hint: "N", Execute: func(m *Model) (tea.Model, tea.Cmd) {
+			m.viewMode = ViewNetworkServerWait
+			m.networkField = 0
+			if m.networkInput[0] == "" {
+				m.networkInput[0] = "3000"
+			}
+			return *m, nil
+		}},
+		{Name: "Network: Connect to Peer", Hint: "N", Execute: func(m *Model) (tea.Model, tea.Cmd) {
+			m.viewMode = ViewNetworkClientInput
+			m.networkField = 0
+			return *m, nil
+		}},
+		{Name: "Network: Disconnect", Execute: func(m *Model) (tea.Model, tea.Cmd) {
+			m.disconnectPeer()
+			m.viewMode = ViewNormal
+			m.statusText = "Disconnected"
+			m.statusError = false
+			return *m, nil
+		}},
 		{Name: "Help", Hint: "?", Execute: func(m *Model) (tea.Model, tea.Cmd) {
 			m.viewMode = ViewHelp
 			return *m, nil

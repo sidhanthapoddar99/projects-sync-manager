@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/sid/psm/internal/git"
+	"github.com/sid/psm/internal/network"
 	"github.com/sid/psm/internal/reference"
 	"github.com/sid/psm/internal/scanner"
 )
@@ -54,16 +56,20 @@ type sshCheckDoneMsg struct {
 type ViewMode int
 
 const (
-	ViewNormal      ViewMode = iota
-	ViewCompare              // Reference file comparison
-	ViewRefMenu              // Reference file menu overlay
-	ViewHelp                 // Help overlay
-	ViewDetail               // Repo detail / interactive right panel
-	ViewClonePrompt          // SSH/HTTPS clone choice overlay
-	ViewFilter               // Filter panel overlay
-	ViewCommand              // Command palette overlay
-	ViewRenameConfirm        // Rename folder confirmation
-	ViewBusy                 // Blocking progress overlay
+	ViewNormal            ViewMode = iota
+	ViewCompare                    // Reference file comparison
+	ViewRefMenu                    // Reference file menu overlay
+	ViewHelp                       // Help overlay
+	ViewDetail                     // Repo detail / interactive right panel
+	ViewClonePrompt                // SSH/HTTPS clone choice overlay
+	ViewFilter                     // Filter panel overlay
+	ViewCommand                    // Command palette overlay
+	ViewRenameConfirm              // Rename folder confirmation
+	ViewBusy                       // Blocking progress overlay
+	ViewNetworkMenu                // Network: Start Server / Connect
+	ViewNetworkServerWait          // Network: server running, waiting for client
+	ViewNetworkClientInput         // Network: URL + code input
+	ViewPeerCompare                // Network: live peer comparison
 )
 
 // Model is the main bubbletea model.
@@ -114,6 +120,16 @@ type Model struct {
 	sshChecked   bool  // have we tested SSH access?
 	sshAvailable bool  // result of SSH access test
 	pendingClone *pendingCloneInfo // clone waiting for user's SSH/HTTPS choice
+
+	// Network peer sync
+	peer           *network.Peer
+	peerTree       *network.PeerTree
+	peerCompareTab int              // 0=combined, 1=local, 2=remote
+	httpServer     *http.Server
+	serverCode     string
+	serverIPs      []string
+	networkInput   [3]string        // [0]=port, [1]=url, [2]=code
+	networkField   int              // active input field (client form)
 }
 
 // NewModel creates a new TUI model.
@@ -218,8 +234,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusText = "Refreshed"
 		m.statusError = false
 		m.loading = false
-		m.viewMode = ViewNormal
+		if m.viewMode != ViewPeerCompare {
+			m.viewMode = ViewNormal
+		}
 		m.busyCh = nil
+		m.sendTreeToPeer()
 		return m, nil
 
 	case refreshSingleDoneMsg:
@@ -233,6 +252,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewMode = ViewNormal
 			m.busyCh = nil
 		}
+		m.sendTreeToPeer()
 		return m, nil
 
 	case syncBranchDoneMsg:
@@ -248,6 +268,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detailView.rebuild()
 		}
 		m.rebuildFlatList()
+		m.sendTreeToPeer()
 		return m, nil
 
 	case syncDoneMsg:
@@ -268,6 +289,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewMode = ViewNormal
 			m.busyCh = nil
 		}
+		m.sendTreeToPeer()
 		return m, nil
 
 	case statusMsg:
@@ -289,9 +311,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.rebuildFlatList()
 			}
 			// Update compare view if active
-			if m.viewMode == ViewCompare && m.compareView != nil {
+			if (m.viewMode == ViewCompare || m.viewMode == ViewPeerCompare) && m.compareView != nil {
 				m.compareView.markCloned(msg.path, newNode)
 			}
+			m.sendTreeToPeer()
 		}
 		return m, nil
 
@@ -306,6 +329,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.compareView = newCompareView(result, m.rootPath)
 			}
 		}
+		if m.viewMode == ViewPeerCompare {
+			m.rebuildPeerCompareView()
+		}
+		m.sendTreeToPeer()
 		return m, nil
 
 	case renameRequestMsg:
@@ -340,6 +367,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case peerConnectedMsg:
+		m.peer = msg.peer
+		m.viewMode = ViewPeerCompare
+		m.peerCompareTab = 0
+		m.statusText = fmt.Sprintf("Connected to %s", msg.hostname)
+		m.statusError = false
+		// Send our tree to the peer
+		m.sendTreeToPeer()
+		// Start listening for peer messages
+		return m, waitForPeerMsg(m.peer.InCh)
+
+	case peerMessageMsg:
+		cmd := m.handlePeerMessage(msg.msg)
+		// Keep listening
+		if m.peer != nil {
+			return m, tea.Batch(cmd, waitForPeerMsg(m.peer.InCh))
+		}
+		return m, cmd
+
+	case peerDisconnectedMsg:
+		m.peer = nil
+		m.peerTree = nil
+		if m.httpServer != nil {
+			network.ShutdownServer(m.httpServer)
+			m.httpServer = nil
+		}
+		m.serverCode = ""
+		if m.viewMode == ViewPeerCompare || m.viewMode == ViewNetworkServerWait {
+			m.viewMode = ViewNormal
+		}
+		m.statusText = "Peer disconnected"
+		m.statusError = false
+		return m, nil
+
+	case connectFailedMsg:
+		m.statusText = fmt.Sprintf("Connection failed: %v", msg.err)
+		m.statusError = true
+		m.viewMode = ViewNormal
+		return m, nil
+
 	case sshCheckDoneMsg:
 		m.sshChecked = true
 		m.sshAvailable = msg.available
@@ -368,6 +435,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Global keys
 	switch msg.String() {
 	case "q", "ctrl+c":
+		m.disconnectPeer()
 		return m, tea.Quit
 	case "?":
 		if m.viewMode == ViewHelp {
@@ -412,6 +480,26 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Command palette keys
 	if m.viewMode == ViewCommand && m.commandPalette != nil {
 		return m.handleCommandKey(msg)
+	}
+
+	// Network menu keys
+	if m.viewMode == ViewNetworkMenu {
+		return m.handleNetworkMenuKey(msg)
+	}
+
+	// Network server wait keys
+	if m.viewMode == ViewNetworkServerWait {
+		return m.handleNetworkServerWaitKey(msg)
+	}
+
+	// Network client input keys
+	if m.viewMode == ViewNetworkClientInput {
+		return m.handleNetworkClientInputKey(msg)
+	}
+
+	// Peer compare keys
+	if m.viewMode == ViewPeerCompare && m.compareView != nil {
+		return m.handlePeerCompareKey(msg)
 	}
 
 	// Compare mode keys
@@ -559,6 +647,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.statusError = true
 			return m, nil
 		}
+	case "N":
+		m.viewMode = ViewNetworkMenu
+		return m, nil
 	case "F":
 		m.viewMode = ViewFilter
 		return m, nil
@@ -752,26 +843,31 @@ func (m Model) executePendingClone(useSSH bool) tea.Cmd {
 }
 
 func (m Model) handleClonePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Return to whichever compare view was active
+	returnView := ViewCompare
+	if m.peer != nil && m.peerTree != nil {
+		returnView = ViewPeerCompare
+	}
 	switch msg.String() {
 	case "a", "A":
 		// SSH for all clones this session
 		m.cloneSSHAll = true
-		m.viewMode = ViewCompare
+		m.viewMode = returnView
 		m.statusText = "Cloning via SSH (all future clones will use SSH)..."
 		return m, m.executePendingClone(true)
 	case "y", "Y":
 		// SSH just this one
-		m.viewMode = ViewCompare
+		m.viewMode = returnView
 		m.statusText = "Cloning via SSH..."
 		return m, m.executePendingClone(true)
 	case "h", "H":
 		// HTTPS for this one
-		m.viewMode = ViewCompare
+		m.viewMode = returnView
 		m.statusText = "Cloning via HTTPS..."
 		return m, m.executePendingClone(false)
 	case "esc":
 		// Cancel
-		m.viewMode = ViewCompare
+		m.viewMode = returnView
 		m.pendingClone = nil
 		m.statusText = "Clone cancelled"
 		return m, nil
@@ -932,6 +1028,21 @@ func (m Model) View() string {
 		return m.commandPalette.render(m.width, m.height)
 	}
 
+	// Network menu overlay
+	if m.viewMode == ViewNetworkMenu {
+		return m.renderNetworkMenu()
+	}
+
+	// Network server wait overlay
+	if m.viewMode == ViewNetworkServerWait {
+		return m.renderNetworkServerWait()
+	}
+
+	// Network client input overlay
+	if m.viewMode == ViewNetworkClientInput {
+		return m.renderNetworkClientInput()
+	}
+
 	// Rename confirmation overlay
 	if m.viewMode == ViewRenameConfirm && m.pendingRename != nil {
 		return m.renderRenameConfirm()
@@ -956,7 +1067,7 @@ func (m Model) View() string {
 
 	// Left panel
 	var leftContent string
-	if m.viewMode == ViewCompare && m.compareView != nil {
+	if (m.viewMode == ViewCompare || m.viewMode == ViewPeerCompare) && m.compareView != nil {
 		leftContent = m.compareView.renderLeft(leftWidth, panelHeight)
 	} else {
 		var filterStatus string
@@ -976,7 +1087,7 @@ func (m Model) View() string {
 	var rightContent string
 	if m.viewMode == ViewDetail && m.detailView != nil {
 		rightContent = m.detailView.render(rightWidth, panelHeight)
-	} else if m.viewMode == ViewCompare && m.compareView != nil {
+	} else if (m.viewMode == ViewCompare || m.viewMode == ViewPeerCompare) && m.compareView != nil {
 		rightContent = m.compareView.renderRight(rightWidth, panelHeight)
 	} else {
 		var selectedNode *scanner.TreeNode
@@ -1014,6 +1125,19 @@ func (m Model) View() string {
 			styleLabel.Render("│ ") +
 			styleAction.Render("?") + styleLabel.Render("Help ") +
 			styleAction.Render("Q") + styleLabel.Render("uit")
+	} else if m.viewMode == ViewPeerCompare {
+		peerName := ""
+		if m.peerTree != nil {
+			peerName = m.peerTree.Hostname
+		}
+		navLine = styleLabel.Render("  ↑↓") + styleValue.Render(" navigate  ") +
+			styleAction.Render("1/2/3") + styleValue.Render(" tabs  ") +
+			styleAction.Render("Enter") + styleValue.Render(" clone  ") +
+			styleAction.Render("A") + styleValue.Render(" clone all  ") +
+			styleAction.Render("D") + styleValue.Render(" disconnect  ") +
+			styleAction.Render("Esc") + styleValue.Render(" back  ") +
+			styleLabel.Render("│ ") +
+			styleGitSynced.Render(fmt.Sprintf("[Connected: %s]", peerName))
 	} else {
 	if m.confirmRefreshAll {
 		navLine = styleGitDirty.Render("  Press Y to confirm full refresh, any other key to cancel")
@@ -1021,6 +1145,10 @@ func (m Model) View() string {
 		filterBadge := ""
 		if m.filters.IsActive() {
 			filterBadge = styleGitPartial.Render(fmt.Sprintf("(%d)", m.filters.ActiveCount()))
+		}
+		peerBadge := ""
+		if m.peer != nil {
+			peerBadge = styleLabel.Render("│ ") + styleGitSynced.Render(fmt.Sprintf("[Connected: %s]", m.peer.Hostname))
 		}
 		navLine = styleLabel.Render("  ↑↓") + styleValue.Render(" siblings  ") +
 			styleLabel.Render("→") + styleValue.Render(" enter dir  ") +
@@ -1030,11 +1158,13 @@ func (m Model) View() string {
 			styleLabel.Render("[") + styleAction.Render("/") + styleLabel.Render("cmd] ") +
 			styleLabel.Render("[") + styleAction.Render("F") + styleLabel.Render("ilter]") + filterBadge + " " +
 			styleLabel.Render("[") + styleAction.Render("f") + styleLabel.Render("ile ref] ") +
+			styleLabel.Render("[") + styleAction.Render("N") + styleLabel.Render("etwork] ") +
 			styleLabel.Render("[") + styleAction.Render("S") + styleLabel.Render("ync] ") +
 			styleLabel.Render("[") + styleAction.Render("n") + styleLabel.Render("ame] ") +
 			styleLabel.Render("[") + styleAction.Render("r") + styleLabel.Render("efresh] ") +
 			styleLabel.Render("[") + styleAction.Render("?") + styleLabel.Render("Help] ") +
-			styleLabel.Render("[") + styleAction.Render("Q") + styleLabel.Render("uit]")
+			styleLabel.Render("[") + styleAction.Render("Q") + styleLabel.Render("uit]") +
+			peerBadge
 	}
 	}
 	statusBar := styleStatusBar.Width(m.width).Render(statusContent + "\n" + navLine)
@@ -1127,6 +1257,12 @@ func (m Model) renderHelp() string {
   A              Clone all missing repos
   Shift+S        Sync all matched repos
   Esc            Exit compare mode
+
+  Peer Sync
+  ─────────
+  N              Open peer sync menu
+  1/2/3          Switch tabs (Combined/Local/Remote)
+  D              Disconnect from peer
 
   General
   ───────

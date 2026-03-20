@@ -20,6 +20,7 @@ type CompareView struct {
 	flatNodes   []*compareTreeNode
 	selectedIdx int
 	rootPath    string
+	headerText  string // custom header (empty = default "Reference Comparison")
 }
 
 // compareTreeNode represents a node in the comparison tree.
@@ -134,6 +135,12 @@ func (n *compareTreeNode) aggregateStatus() string {
 		return result
 	}
 	return "mixed"
+}
+
+func newCompareViewWithHeader(result *reference.CompareResult, rootPath string, header string) *CompareView {
+	cv := newCompareView(result, rootPath)
+	cv.headerText = header
+	return cv
 }
 
 func newCompareView(result *reference.CompareResult, rootPath string) *CompareView {
@@ -378,7 +385,11 @@ func compareGetSiblings(node *compareTreeNode) ([]*compareTreeNode, int) {
 
 func (cv *CompareView) renderLeft(width, height int) string {
 	var lines []string
-	lines = append(lines, styleHeader.Render("  Reference Comparison"))
+	header := "Reference Comparison"
+	if cv.headerText != "" {
+		header = cv.headerText
+	}
+	lines = append(lines, styleHeader.Render("  "+header))
 	lines = append(lines, "")
 
 	summary := fmt.Sprintf("  Matched: %d  Missing: %d  Extra: %d",
