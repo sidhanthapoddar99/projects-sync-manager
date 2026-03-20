@@ -459,9 +459,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Normal mode keys
 	switch msg.String() {
 	case "up", "k":
-		m.selectedIdx = navigateUp(m.flatNodes, m.selectedIdx)
+		m.selectedIdx = navigateUp(m.flatNodes, m.selectedIdx, m.filters.IsActive())
 	case "down", "j":
-		m.selectedIdx = navigateDown(m.flatNodes, m.selectedIdx)
+		m.selectedIdx = navigateDown(m.flatNodes, m.selectedIdx, m.filters.IsActive())
 	case "right", "l":
 		if m.selectedIdx < len(m.flatNodes) {
 			targetNode := m.flatNodes[m.selectedIdx] // save reference before rebuild
@@ -1027,13 +1027,14 @@ func (m Model) View() string {
 			styleLabel.Render("←") + styleValue.Render(" back  ") +
 			styleAction.Render("Enter") + styleValue.Render(" details  ") +
 			styleLabel.Render("│ ") +
-			styleAction.Render("/") + styleLabel.Render("cmd ") +
-			styleAction.Render("F") + styleLabel.Render("ilter") + filterBadge + " " +
-			styleAction.Render("f") + styleLabel.Render("ile ref ") +
-			styleAction.Render("S") + styleLabel.Render("ync ") +
-			styleAction.Render("r") + styleLabel.Render("efresh ") +
-			styleAction.Render("?") + styleLabel.Render("Help ") +
-			styleAction.Render("Q") + styleLabel.Render("uit")
+			styleLabel.Render("[") + styleAction.Render("/") + styleLabel.Render("cmd] ") +
+			styleLabel.Render("[") + styleAction.Render("F") + styleLabel.Render("ilter]") + filterBadge + " " +
+			styleLabel.Render("[") + styleAction.Render("f") + styleLabel.Render("ile ref] ") +
+			styleLabel.Render("[") + styleAction.Render("S") + styleLabel.Render("ync] ") +
+			styleLabel.Render("[") + styleAction.Render("n") + styleLabel.Render("ame] ") +
+			styleLabel.Render("[") + styleAction.Render("r") + styleLabel.Render("efresh] ") +
+			styleLabel.Render("[") + styleAction.Render("?") + styleLabel.Render("Help] ") +
+			styleLabel.Render("[") + styleAction.Render("Q") + styleLabel.Render("uit]")
 	}
 	}
 	statusBar := styleStatusBar.Width(m.width).Render(statusContent + "\n" + navLine)

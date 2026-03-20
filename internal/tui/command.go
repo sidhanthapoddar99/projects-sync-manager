@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -110,6 +111,27 @@ func buildCommands() []Command {
 		}},
 		{Name: "Filter: Open Panel", Hint: "F", Execute: func(m *Model) (tea.Model, tea.Cmd) {
 			m.viewMode = ViewFilter
+			return *m, nil
+		}},
+		{Name: "Rename Folder to Match Repo", Hint: "n", Execute: func(m *Model) (tea.Model, tea.Cmd) {
+			if m.selectedIdx < len(m.flatNodes) {
+				node := m.flatNodes[m.selectedIdx]
+				if node.IsGitRepo && node.Status != nil && node.Status.NameMismatch() {
+					newName := node.Status.RepoName
+					oldPath := node.Path
+					newPath := filepath.Join(filepath.Dir(oldPath), newName)
+					m.pendingRename = &pendingRenameInfo{
+						node:    node,
+						oldPath: oldPath,
+						newPath: newPath,
+						newName: newName,
+					}
+					m.viewMode = ViewRenameConfirm
+					return *m, nil
+				}
+				m.statusText = "No name mismatch to fix"
+				m.statusError = true
+			}
 			return *m, nil
 		}},
 		{Name: "Help", Hint: "?", Execute: func(m *Model) (tea.Model, tea.Cmd) {

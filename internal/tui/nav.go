@@ -17,9 +17,20 @@ func getSiblings(node *scanner.TreeNode) ([]*scanner.TreeNode, int) {
 }
 
 // navigateUp moves to the previous sibling at the same directory level.
-// Returns the new selectedIdx in the flatNodes list, or -1 if no movement.
-func navigateUp(flatNodes []*scanner.TreeNode, selectedIdx int) int {
+// When filtered is true, moves sequentially through the flat list instead.
+// Returns the new selectedIdx in the flatNodes list.
+func navigateUp(flatNodes []*scanner.TreeNode, selectedIdx int, filtered bool) int {
 	if selectedIdx <= 0 || selectedIdx >= len(flatNodes) {
+		return selectedIdx
+	}
+
+	if filtered {
+		// Skip directory nodes — only land on git repos
+		for i := selectedIdx - 1; i >= 0; i-- {
+			if flatNodes[i].IsGitRepo {
+				return i
+			}
+		}
 		return selectedIdx
 	}
 
@@ -39,9 +50,20 @@ func navigateUp(flatNodes []*scanner.TreeNode, selectedIdx int) int {
 }
 
 // navigateDown moves to the next sibling at the same directory level.
+// When filtered is true, moves sequentially through the flat list instead.
 // Returns the new selectedIdx in the flatNodes list.
-func navigateDown(flatNodes []*scanner.TreeNode, selectedIdx int) int {
+func navigateDown(flatNodes []*scanner.TreeNode, selectedIdx int, filtered bool) int {
 	if selectedIdx < 0 || selectedIdx >= len(flatNodes) {
+		return selectedIdx
+	}
+
+	if filtered {
+		// Skip directory nodes — only land on git repos
+		for i := selectedIdx + 1; i < len(flatNodes); i++ {
+			if flatNodes[i].IsGitRepo {
+				return i
+			}
+		}
 		return selectedIdx
 	}
 
