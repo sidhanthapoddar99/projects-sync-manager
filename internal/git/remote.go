@@ -121,6 +121,25 @@ func CheckSSHAccess(host string) bool {
 	return false
 }
 
+// ExtractRepoName extracts the repository name from a git URL (SSH or HTTPS).
+// e.g. "git@github.com:user/my-repo.git" -> "my-repo"
+// e.g. "https://github.com/user/my-repo" -> "my-repo"
+func ExtractRepoName(url string) string {
+	url = strings.TrimSuffix(url, "/")
+	url = strings.TrimSuffix(url, ".git")
+	// SSH format: git@host:user/repo
+	if matches := sshURLPattern.FindStringSubmatch(url); matches != nil {
+		parts := strings.Split(matches[2], "/")
+		return parts[len(parts)-1]
+	}
+	// HTTPS or other: last path segment
+	parts := strings.Split(url, "/")
+	if len(parts) > 0 {
+		return parts[len(parts)-1]
+	}
+	return ""
+}
+
 // runGit executes a git command in the given directory and returns stdout.
 // It passes -c safe.directory=* to handle copied/moved repositories that
 // git considers "unsafe" due to ownership mismatch.

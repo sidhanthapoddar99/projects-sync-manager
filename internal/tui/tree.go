@@ -23,12 +23,16 @@ func renderLegend() string {
 		styleGitPartial.Render("↓") + styleLabel.Render("pull ") +
 		styleGitSynced.Render("+") + styleLabel.Render("staged ") +
 		styleGitDirty.Render("~") + styleLabel.Render("unstaged ") +
-		styleNonGit.Render("…") + styleLabel.Render("untracked")
+		styleNonGit.Render("…") + styleLabel.Render("untracked ") +
+		styleGitPartial.Render("≠") + styleLabel.Render("name mismatch")
 }
 
 // renderTree renders the left panel tree view.
-func renderTree(nodes []*scanner.TreeNode, selectedIdx int, width, height int) string {
+func renderTree(nodes []*scanner.TreeNode, selectedIdx int, width, height int, filterStatus string) string {
 	if len(nodes) == 0 {
+		if filterStatus != "" {
+			return styleAction.Render("  "+filterStatus) + "\n" + styleNonGit.Render("  No matching repos")
+		}
 		return styleNonGit.Render("  No directories found")
 	}
 
@@ -40,6 +44,13 @@ func renderTree(nodes []*scanner.TreeNode, selectedIdx int, width, height int) s
 	lines = append(lines, styleTreePrefix.Render("  "+strings.Repeat("─", width-4)))
 
 	legendLines := 3 // legend + separator + blank line
+
+	// Filter status line
+	if filterStatus != "" {
+		lines = append(lines, styleAction.Render("  "+filterStatus))
+		legendLines++
+	}
+
 	treeHeight := height - legendLines - 1 // -1 for possible scroll indicator
 
 	// Center the selected item in the viewport
@@ -168,6 +179,10 @@ func getIndicators(node *scanner.TreeNode) string {
 	}
 	if s.Untracked > 0 {
 		parts = append(parts, styleNonGit.Render(fmt.Sprintf("…%d", s.Untracked)))
+	}
+
+	if s.NameMismatch() {
+		parts = append(parts, styleGitPartial.Render("≠"))
 	}
 
 	return strings.Join(parts, " ")

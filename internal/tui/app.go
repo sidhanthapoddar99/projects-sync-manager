@@ -36,6 +36,8 @@ const (
 	ViewHelp                 // Help overlay
 	ViewDetail               // Repo detail / interactive right panel
 	ViewClonePrompt          // SSH/HTTPS clone choice overlay
+	ViewFilter               // Filter panel overlay
+	ViewCommand              // Command palette overlay
 )
 
 // Model is the main bubbletea model.
@@ -64,6 +66,13 @@ type Model struct {
 
 	confirmRefreshAll bool // waiting for y/n confirmation on full refresh
 
+	// Filters
+	filters        FilterSet
+	filterPanelIdx int // cursor position in filter panel
+
+	// Command palette
+	commandPalette *CommandPalette
+
 	// SSH clone preference (session-wide)
 	cloneSSHAll  bool  // user chose "A" — SSH for all clones this session
 	sshChecked   bool  // have we tested SSH access?
@@ -78,6 +87,7 @@ func NewModel(rootPath string, maxDepth int) Model {
 		maxDepth:   maxDepth,
 		loading:    true,
 		progressCh: make(chan scanner.ScanProgress, 100),
+		filters:    NewFilterSet(),
 	}
 }
 
@@ -286,6 +296,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleClonePromptKey(msg)
 	}
 
+	// Filter panel keys
+	if m.viewMode == ViewFilter {
+		return m.handleFilterKey(msg)
+	}
+
+	// Command palette keys
+	if m.viewMode == ViewCommand && m.commandPalette != nil {
+		return m.handleCommandKey(msg)
+	}
+
 	// Compare mode keys
 	if m.viewMode == ViewCompare && m.compareView != nil {
 		return m.handleCompareKey(msg)
@@ -389,6 +409,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleActionKey(handleOpenExplorer)
 	case "b":
 		return m.handleBrowserKey()
+	case "F":
+		m.viewMode = ViewFilter
+		return m, nil
+	case "/":
+		m.commandPalette = newCommandPalette(&m)
+		m.viewMode = ViewCommand
+		return m, nil
 	}
 
 	return m, nil
@@ -593,6 +620,59 @@ func (m Model) handleClonePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	allFilters := AllFilterTypes()
+	switch msg.String() {
+	case "esc":
+		m.viewMode = ViewNormal
+		return m, nil
+	case "up", "k":
+		if m.filterPanelIdx > 0 {
+			m.filterPanelIdx--
+		}
+	case "down", "j":
+		if m.filterPanelIdx < len(allFilters)-1 {
+			m.filterPanelIdx++
+		}
+	case " ", "enter":
+		if m.filterPanelIdx < len(allFilters) {
+			m.filters.Toggle(allFilters[m.filterPanelIdx])
+			m.rebuildFlatList()
+			if m.filters.IsActive() {
+				count := m.filters.CountMatches(m.root.FlattenVisible())
+				m.statusText = fmt.Sprintf("Filter: %s (%d repos)", m.filters.ActiveNames(), count)
+				m.statusError = false
+			} else {
+				m.statusText = "Filters cleared"
+				m.statusError = false
+			}
+		}
+	case "c":
+		m.filters.Clear()
+		m.rebuildFlatList()
+		m.statusText = "Filters cleared"
+		m.statusError = false
+	}
+	return m, nil
+}
+
+func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	result := m.commandPalette.handleKey(msg)
+	switch result.action {
+	case cmdActionClose:
+		m.viewMode = ViewNormal
+		m.commandPalette = nil
+	case cmdActionExecute:
+		m.viewMode = ViewNormal
+		cmd := result.command
+		m.commandPalette = nil
+		if cmd != nil {
+			return cmd.Execute(&m)
+		}
+	}
+	return m, nil
+}
+
 func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
@@ -626,7 +706,8 @@ func (m *Model) rebuildFlatList() {
 		m.flatNodes = nil
 		return
 	}
-	m.flatNodes = m.root.FlattenVisible()
+	visible := m.root.FlattenVisible()
+	m.flatNodes = m.filters.Apply(visible)
 	if m.selectedIdx >= len(m.flatNodes) {
 		m.selectedIdx = len(m.flatNodes) - 1
 	}
@@ -655,6 +736,16 @@ func (m Model) View() string {
 		return m.renderRefMenu()
 	}
 
+	// Filter panel overlay
+	if m.viewMode == ViewFilter {
+		return renderFilterPanel(&m.filters, m.filterPanelIdx, m.width, m.height)
+	}
+
+	// Command palette overlay
+	if m.viewMode == ViewCommand && m.commandPalette != nil {
+		return m.commandPalette.render(m.width, m.height)
+	}
+
 	// Clone prompt overlay
 	if m.viewMode == ViewClonePrompt {
 		return m.renderClonePrompt()
@@ -677,7 +768,12 @@ func (m Model) View() string {
 	if m.viewMode == ViewCompare && m.compareView != nil {
 		leftContent = m.compareView.renderLeft(leftWidth, panelHeight)
 	} else {
-		leftContent = renderTree(m.flatNodes, m.selectedIdx, leftWidth, panelHeight)
+		var filterStatus string
+		if m.filters.IsActive() {
+			count := m.filters.CountMatches(m.root.FlattenVisible())
+			filterStatus = fmt.Sprintf("Filter: %s (%d repos)", m.filters.ActiveNames(), count)
+		}
+		leftContent = renderTree(m.flatNodes, m.selectedIdx, leftWidth, panelHeight, filterStatus)
 	}
 
 	leftPanel := stylePanelBorder.
@@ -731,18 +827,20 @@ func (m Model) View() string {
 	if m.confirmRefreshAll {
 		navLine = styleGitDirty.Render("  Press Y to confirm full refresh, any other key to cancel")
 	} else {
+		filterBadge := ""
+		if m.filters.IsActive() {
+			filterBadge = styleGitPartial.Render(fmt.Sprintf("(%d)", m.filters.ActiveCount()))
+		}
 		navLine = styleLabel.Render("  ↑↓") + styleValue.Render(" siblings  ") +
 			styleLabel.Render("→") + styleValue.Render(" enter dir  ") +
 			styleLabel.Render("←") + styleValue.Render(" back  ") +
 			styleAction.Render("Enter") + styleValue.Render(" details  ") +
 			styleLabel.Render("│ ") +
-			styleAction.Render("r") + styleLabel.Render("efresh ") +
-			styleAction.Render("R") + styleLabel.Render("efresh all ") +
-			styleAction.Render("F") + styleLabel.Render("ile ref ") +
+			styleAction.Render("/") + styleLabel.Render("cmd ") +
+			styleAction.Render("F") + styleLabel.Render("ilter") + filterBadge + " " +
+			styleAction.Render("f") + styleLabel.Render("ile ref ") +
 			styleAction.Render("S") + styleLabel.Render("ync ") +
-			styleAction.Render("C") + styleLabel.Render("ode ") +
-			styleAction.Render("E") + styleLabel.Render("xplorer ") +
-			styleAction.Render("B") + styleLabel.Render("rowser ") +
+			styleAction.Render("r") + styleLabel.Render("efresh ") +
 			styleAction.Render("?") + styleLabel.Render("Help ") +
 			styleAction.Render("Q") + styleLabel.Render("uit")
 	}

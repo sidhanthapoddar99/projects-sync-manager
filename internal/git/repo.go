@@ -14,12 +14,22 @@ type RepoStatus struct {
 	RemoteURL     string
 	HTTPSURL      string
 	CurrentBranch string
+	RepoName      string // name extracted from remote URL
 	Branches      []BranchStatus
 	Staged        int
 	Unstaged      int
 	Untracked     int
 	TotalAhead    int // sum across all branches
 	TotalBehind   int // sum across all branches
+}
+
+// NameMismatch returns true if the directory name differs from the remote repo name.
+func (r *RepoStatus) NameMismatch() bool {
+	if r.RepoName == "" {
+		return false
+	}
+	dirName := filepath.Base(r.Path)
+	return !strings.EqualFold(dirName, r.RepoName)
 }
 
 // SyncState returns the overall sync state for display coloring.
@@ -86,6 +96,7 @@ func GetRepoStatus(path string) *RepoStatus {
 	status.HasRemote = status.RemoteURL != ""
 	if status.HasRemote {
 		status.HTTPSURL = SSHToHTTPS(status.RemoteURL)
+		status.RepoName = ExtractRepoName(status.RemoteURL)
 	}
 
 	// Working tree status

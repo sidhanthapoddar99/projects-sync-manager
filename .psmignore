@@ -1,0 +1,16 @@
+# PSM Ignore File
+# Directories matching these regex patterns are skipped during scanning.
+# One pattern per line. Lines starting with # are comments.
+# These are in addition to the built-in defaults.
+#
+# Built-in defaults already cover:
+#   Hidden dirs (.*)         node_modules    build/dist/out/target
+#   __pycache__/venv         vendor          .gradle/.mvn
+#   .idea/.vscode            .cache/.local   coverage/.next/.nuxt
+#
+# Add your custom patterns below:
+
+# Example: skip any directory named "archive" or "backup"
+# ^archive$
+# ^backup$
+# ^old-
