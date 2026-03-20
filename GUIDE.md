@@ -40,15 +40,29 @@ Key design principles:
 
 **Linux / macOS:**
 ```bash
-curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/install.sh | sh
+curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/psm.sh | sh
 ```
 
 **Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/install.ps1 | iex
+irm https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/psm.ps1 | iex
 ```
 
-The installer downloads the correct binary for your OS/architecture, caches it, and runs it. Subsequent runs reuse the cached binary.
+The script downloads the correct binary for your OS/architecture, caches it, and runs it. Subsequent runs reuse the cached binary.
+
+### For Regular Use
+
+Download the script locally so you can run it without piping from the internet each time:
+
+```bash
+# Download once
+curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/psm.sh -o ~/.local/bin/psm.sh && chmod +x ~/.local/bin/psm.sh
+
+# Run anytime
+psm.sh -d ~/projects
+```
+
+The script auto-updates — it checks for new releases on each run.
 
 ### Install to PATH
 

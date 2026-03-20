@@ -3,9 +3,9 @@
 # Works on Linux and macOS. Downloads the latest binary once, caches it, and runs it.
 #
 # Usage:
-#   curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/install.sh | sh
-#   curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/install.sh | sh -s -- -d ~/projects
-#   curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/install.sh | sh -s -- -d ~/projects -h 5
+#   curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/psm.sh | sh
+#   curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/psm.sh | sh -s -- -d ~/projects
+#   curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/psm.sh | sh -s -- -d ~/projects -h 5
 
 set -e
 

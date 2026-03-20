@@ -14,21 +14,58 @@ One command — auto-detects your OS/arch, downloads the latest binary, caches i
 
 **Linux / macOS:**
 ```bash
-curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/install.sh | sh
+curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/psm.sh | sh
 ```
 
 For a custom directory:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/install.sh | sh -s -- -d ~/projects
+curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/psm.sh | sh -s -- -d ~/projects
 ```
 
 **Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/install.ps1 | iex
+irm https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/psm.ps1 | iex
 ```
 
 That's it. The binary is cached in your temp folder (`/tmp/psm-cache/` or `%TEMP%\psm-cache\`) and reused on future runs. A new version is downloaded automatically when a release is published.
+
+### For Regular Use
+
+Download the script locally so you can run it anytime without the `curl` pipe:
+
+**Linux / macOS:**
+```bash
+# Download once and add to path (e.g. ~/.local/bin/) 
+curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/psm.sh -o ~/.local/bin/psm.sh && chmod +x ~/.local/bin/psm.sh
+
+# Run anytime
+psm.sh
+psm.sh -d ~/projects
+```
+
+```bash
+
+# Download once and run from current directory
+curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/psm.sh -o ./psm.sh && chmod +x ./psm.sh
+
+# Run
+./psm.sh
+./psm.sh -d ~/projects
+
+```
+
+
+**Windows (PowerShell):**
+```powershell
+# Download once
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/psm.ps1 -OutFile "$HOME\psm.ps1"
+
+# Run anytime
+& "$HOME\psm.ps1"
+```
+
+The script handles auto-updating — it checks for new releases each run and downloads them automatically.
 
 <details>
 <summary>Other installation methods</summary>
@@ -159,6 +196,12 @@ done
 # Optional: compress linux binaries (~40% smaller)
 # Requires upx: sudo apt install upx-ucl
 upx --best dist/psm-linux-*
+```
+
+```bash
+# Run
+./psm
+./psm -d ~/projects
 ```
 
 ---

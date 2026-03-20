@@ -2,9 +2,9 @@
 # Downloads the latest binary once, caches it in TEMP, and runs it.
 #
 # Usage:
-#   irm https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/psm.ps1 | iex
 #   # Or with arguments:
-#   $env:PSM_ARGS="-d C:\projects"; irm https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/install.ps1 | iex
+#   $env:PSM_ARGS="-d C:\projects"; irm https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/psm.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
