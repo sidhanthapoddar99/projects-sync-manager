@@ -1,0 +1,442 @@
+# PSM User Guide
+
+A comprehensive guide to using Projects Sync Manager.
+
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Installation](#installation)
+- [Getting Started](#getting-started)
+- [Navigation](#navigation)
+- [Status Indicators](#status-indicators)
+- [Syncing Repos](#syncing-repos)
+- [Repo Detail Panel](#repo-detail-panel)
+- [Refreshing](#refreshing)
+- [Command Palette](#command-palette)
+- [Filters](#filters)
+- [Reference Files](#reference-files)
+- [Opening External Tools](#opening-external-tools)
+- [Ignore File](#ignore-file)
+- [Tips & Workflows](#tips--workflows)
+
+---
+
+## Overview
+
+PSM scans a directory tree for git repositories and presents them in a two-panel TUI. The left panel shows a navigable tree with color-coded sync indicators. The right panel shows details for the selected repo — branches, working tree status, and available actions.
+
+Key design principles:
+- **No automatic network calls.** PSM reads local git tracking refs on startup. Remote fetches only happen when you explicitly refresh.
+- **Conservative sync.** Never auto-resolves conflicts. Blocks on uncommitted changes or diverged branches. Uses `--ff-only` for pulls.
+- **Single static binary.** No runtime dependencies beyond `git`.
+
+---
+
+## Installation
+
+### Quick Start (recommended)
+
+**Linux / macOS:**
+```bash
+curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/install.sh | sh
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/install.ps1 | iex
+```
+
+The installer downloads the correct binary for your OS/architecture, caches it, and runs it. Subsequent runs reuse the cached binary.
+
+### Install to PATH
+
+```bash
+sudo curl -sL https://github.com/sidhanthapoddar99/projects-sync-manager/releases/latest/download/psm-linux-amd64 \
+  -o /usr/local/bin/psm && sudo chmod +x /usr/local/bin/psm
+```
+
+### Build from Source
+
+```bash
+go build -ldflags="-s -w" -o psm ./cmd/
+```
+
+---
+
+## Getting Started
+
+```bash
+# Scan current directory (default depth: 3)
+psm
+
+# Scan a specific directory
+psm -d ~/projects
+
+# Scan deeper
+psm -d ~/projects -h 5
+```
+
+On first run, PSM creates a `.psmignore` file with sensible defaults. The initial scan only reads local git state — no network calls are made.
+
+---
+
+## Navigation
+
+PSM uses **sibling-based navigation**. Up/Down move between items at the same directory level, not through a flat list.
+
+| Key | Action |
+|-----|--------|
+| `↑` or `k` | Previous sibling |
+| `↓` or `j` | Next sibling |
+| `→` or `l` | Enter / expand directory |
+| `←` or `h` | Collapse directory / go to parent |
+| `Enter` | Open detail panel for a git repo |
+
+**Important:** Directories containing git repos cannot be collapsed. This ensures you always see your repos.
+
+To navigate into a subdirectory's children, press `→` to expand it, then `→` again to enter it. To go back up, press `←`.
+
+---
+
+## Status Indicators
+
+The tree view shows colored indicators next to each repo:
+
+```
+my-project/     ● ✓                    # synced (green)
+api-server/     ● △ ↑2                 # 2 commits to push (yellow)
+webapp/         ● ✗ ~4 …2              # uncommitted changes (red)
+experiments/    ● ?                     # no remote configured (blue)
+data-scripts/   ● ✓ ≠                  # name mismatch (yellow ≠)
+some-folder/    ○                       # not a git repo (grey)
+```
+
+### Symbol Reference
+
+| Symbol | Meaning |
+|--------|---------|
+| `●` | Git repository |
+| `○` | Not a git repo |
+| `✓` | All branches synced |
+| `△` | Some branches ahead/behind |
+| `✗` | Dirty (uncommitted changes or diverged branches) |
+| `?` | No remote configured |
+| `≠` | Folder name differs from remote repo name |
+| `↑N` | N commits to push |
+| `↓N` | N commits to pull |
+| `+N` | N staged files |
+| `~N` | N unstaged files |
+| `…N` | N untracked files |
+
+### Name Mismatch (`≠`)
+
+The `≠` indicator appears when your local folder name doesn't match the repository name from the remote URL. For example, if you cloned `github.com/user/my-app` into a folder called `app/`, the `≠` will show. This helps identify repos that may have been renamed or cloned into non-standard directories.
+
+---
+
+## Syncing Repos
+
+Press `s` on a git repo to sync its current branch:
+
+- **Ahead only:** Pushes to remote
+- **Behind only:** Pulls with `--ff-only` (fast-forward only, no merge commits)
+- **Diverged:** Blocked — you need to resolve manually
+- **Uncommitted changes:** Blocked — commit or stash first
+- **Up to date:** No action needed
+
+The right panel shows what will happen before you press sync:
+```
+[S] Sync (push 2 commits)
+[S] Sync (pull 3 commits)
+[S] Sync (blocked: uncommitted changes)
+[S] Sync (up to date)
+```
+
+### Per-Branch Sync (Detail Panel)
+
+For more control, press `Enter` to open the detail panel. You can select any branch and sync it individually — even non-current branches are synced without checkout using `git fetch origin branch:branch` and `git push origin branch`.
+
+---
+
+## Repo Detail Panel
+
+Press `Enter` on a git repo to open the interactive detail panel.
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Navigate within the focused section |
+| `Tab` | Switch between Branches and Actions |
+| `Enter` | Select a branch / execute an action |
+| `Esc` | Close the detail panel |
+
+### Branches Section
+
+Lists all local and remote branches with their sync status. The current branch is marked with `*`. Select a branch to see its available actions.
+
+### Actions Section
+
+Context-sensitive actions based on the selected branch:
+- **Refresh this repo** — fetch from remote and update status
+- **Sync branch: \<name\>** — push/pull the selected branch
+- **Sync current branch** — same as pressing `s` in the tree
+- **Open in VS Code / Explorer / Browser** — external tool integrations
+
+---
+
+## Refreshing
+
+| Key | Action |
+|-----|--------|
+| `r` | Refresh the selected repo (fetches from remote) |
+| `R` | Refresh ALL repos (requires `y` confirmation) |
+
+The initial scan only reads local refs — no network calls. Press `r` on a repo to fetch from its remote and update the displayed status. Press `R` to fetch all repos (this can take a while with many repos).
+
+---
+
+## Command Palette
+
+Press `/` to open the command palette — a VS Code-style fuzzy search bar for all available commands.
+
+### Using the Palette
+
+| Key | Action |
+|-----|--------|
+| Type | Filter commands by fuzzy search |
+| `↑` / `↓` | Navigate results |
+| `Tab` | Auto-complete with selected command name |
+| `Enter` | Execute the selected command |
+| `Esc` | Close the palette |
+
+### Available Commands
+
+| Command | Description |
+|---------|-------------|
+| Sync | Sync the selected repo |
+| Refresh | Refresh the selected repo |
+| Refresh All | Refresh all repos |
+| Open in VS Code | Open selected in VS Code |
+| Open in Explorer | Open in file manager |
+| Open in Browser | Open remote URL in browser |
+| Reference: Generate | Generate a reference file |
+| Reference: Load & Compare | Load and compare a reference file |
+| Filter: Toggle Dirty | Toggle the dirty filter |
+| Filter: Toggle Partial | Toggle the partial filter |
+| Filter: Toggle Synced | Toggle the synced filter |
+| Filter: Toggle No Remote | Toggle the no-remote filter |
+| Filter: Toggle Ahead | Toggle the ahead filter |
+| Filter: Toggle Behind | Toggle the behind filter |
+| Filter: Toggle Name Mismatch | Toggle the name mismatch filter |
+| Filter: Clear All | Clear all active filters |
+| Filter: Open Panel | Open the filter panel |
+| Help | Show the help overlay |
+| Quit | Quit the application |
+
+### Fuzzy Search
+
+The search matches characters in order, not necessarily consecutive. Typing `fd` matches **F**ilter: Toggle **D**irty. Word boundary matches (start of words after spaces or colons) score higher for more relevant results.
+
+---
+
+## Filters
+
+Filters let you focus on repos that need attention. Multiple filters combine with OR logic — enabling "Dirty" and "Partial" shows repos that are dirty OR partially synced.
+
+### Filter Panel
+
+Press `F` (capital F) to open the filter panel overlay.
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Navigate filters |
+| `Space` or `Enter` | Toggle the selected filter |
+| `c` | Clear all filters |
+| `Esc` | Close the panel |
+
+The panel shows checkboxes for each filter:
+```
+[ ] Dirty              — uncommitted changes or diverged
+[x] Partial            — branches ahead/behind
+[ ] Synced             — all branches synced
+[ ] No Remote          — no remote configured
+[ ] Ahead              — has commits to push
+[ ] Behind             — has commits to pull
+[ ] Name Mismatch      — folder name differs from repo name
+```
+
+### Active Filter Indicator
+
+When filters are active:
+- A blue status line appears below the tree legend showing active filters and match count: `Filter: dirty, partial (12 repos)`
+- The status bar shows a yellow badge next to `Filter` with the active count: `Filter(2)`
+- The tree only shows matching repos and their parent directories
+
+### Quick Filter via Command Palette
+
+Press `/` and type `filter dirty` to toggle the dirty filter without opening the panel. Or type `filter clear` to clear all filters.
+
+---
+
+## Reference Files
+
+Reference files capture a snapshot of your project structure — which repos exist and their remote URLs. Use them to replicate your setup on another machine.
+
+### Generate
+
+Press `f` then `g` (or use the command palette: `Reference: Generate`).
+
+This creates `projects-ref.json` in the scanned directory root. The file contains relative paths and HTTPS-normalized remote URLs for every git repo with a remote.
+
+### Load & Compare
+
+Press `f` then `l` (or use the command palette: `Reference: Load & Compare`).
+
+PSM loads the reference file and compares it against the current directory tree:
+
+| Status | Color | Meaning |
+|--------|-------|---------|
+| Matched | Green | Repo exists locally at the expected path |
+| Missing | Red | Repo is in the reference but not found locally |
+| Extra | Yellow | Repo exists locally but not in the reference |
+
+### Compare View Navigation
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Navigate the comparison tree |
+| `→` / `←` | Expand / collapse directories |
+| `Enter` | Clone a missing repo |
+| `a` | Clone ALL missing repos |
+| `S` | Sync all matched repos |
+| `Esc` | Return to normal view |
+
+### Clone Protocol
+
+When cloning, PSM checks if SSH access is available:
+- If SSH works, you're prompted to choose SSH or HTTPS
+- Press `A` to use SSH for all clones in the session
+- Press `Y` for SSH just this once
+- Press `H` for HTTPS
+- If SSH is unavailable, HTTPS is used automatically
+
+---
+
+## Opening External Tools
+
+| Key | Action |
+|-----|--------|
+| `c` | Open in VS Code |
+| `e` | Open in file explorer |
+| `b` | Open remote URL in browser |
+
+These work on both regular directories and git repos. On WSL, PSM automatically converts paths and uses Windows-side applications.
+
+---
+
+## Ignore File
+
+PSM auto-generates a `.psmignore` file on first run with defaults covering:
+- Hidden directories (`.git`, `.cache`, etc.)
+- Build outputs (`build`, `dist`, `target`, `bin`, `obj`)
+- Dependencies (`node_modules`, `vendor`, `__pycache__`)
+- IDE directories (`.idea`, `.vscode`)
+- Framework caches (`.next`, `.nuxt`)
+
+Add custom regex patterns (one per line) to skip additional directories. Lines starting with `#` are comments.
+
+---
+
+## Tips & Workflows
+
+### Morning Sync Routine
+
+1. Launch PSM: `psm -d ~/projects`
+2. Press `R` then `y` to refresh all repos from remotes
+3. Press `F` to open filters, enable "Partial" to see what needs syncing
+4. Navigate to each repo and press `s` to sync
+
+### Setting Up a New Machine
+
+1. Copy `projects-ref.json` from your existing machine
+2. Create the target directory: `mkdir ~/projects`
+3. Place the reference file: `cp projects-ref.json ~/projects/`
+4. Run PSM: `psm -d ~/projects`
+5. Press `f` then `l` to load the reference
+6. Press `a` to clone all missing repos
+
+### Finding Repos That Need Attention
+
+Use filters to focus:
+- **Dirty** — repos with uncommitted work
+- **Ahead** — repos with unpushed commits
+- **Behind** — repos that need pulling
+- **Name Mismatch** — repos cloned into non-standard directories
+
+### Keyboard Efficiency
+
+- Use `/` (command palette) for any action — faster than remembering individual keys
+- Use `F` for filter panel when you want to combine multiple filters visually
+- Use `Enter` on a repo for the detail panel when you need per-branch control
+
+---
+
+## Key Reference
+
+### Normal View
+
+| Key | Action |
+|-----|--------|
+| `↑/k` `↓/j` | Navigate siblings |
+| `→/l` `←/h` | Enter/exit directories |
+| `Enter` | Open detail panel |
+| `/` | Command palette |
+| `F` | Filter panel |
+| `s` | Sync selected repo |
+| `r` | Refresh selected repo |
+| `R` | Refresh all repos |
+| `f` | Reference file menu |
+| `c` | Open in VS Code |
+| `e` | Open in file explorer |
+| `b` | Open in browser |
+| `?` | Help |
+| `q` | Quit |
+
+### Detail Panel
+
+| Key | Action |
+|-----|--------|
+| `↑/↓` | Navigate |
+| `Tab` | Switch section |
+| `Enter` | Execute action |
+| `Esc` | Close |
+
+### Filter Panel
+
+| Key | Action |
+|-----|--------|
+| `↑/↓` | Navigate |
+| `Space/Enter` | Toggle filter |
+| `c` | Clear all |
+| `Esc` | Close |
+
+### Command Palette
+
+| Key | Action |
+|-----|--------|
+| Type | Fuzzy search |
+| `↑/↓` | Navigate |
+| `Tab` | Auto-complete |
+| `Enter` | Execute |
+| `Esc` | Close |
+
+### Compare View
+
+| Key | Action |
+|-----|--------|
+| `↑/↓/←/→` | Navigate |
+| `Enter` | Clone missing repo |
+| `a` | Clone all missing |
+| `S` | Sync all matched |
+| `Esc` | Back to normal view |

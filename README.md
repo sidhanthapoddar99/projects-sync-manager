@@ -2,7 +2,9 @@
 
 A fast, single-binary TUI tool to manage and sync dozens of Git repositories across multiple machines.
 
-Scan a directory tree, see the sync status of every repo at a glance, pull/push with one keystroke, and use reference files to replicate your project structure on a new machine.
+Scan a directory tree, see the sync status of every repo at a glance, pull/push with one keystroke, filter by status, and use reference files to replicate your project structure on a new machine.
+
+> For a comprehensive usage guide, see **[GUIDE.md](GUIDE.md)**.
 
 ---
 
@@ -25,10 +27,6 @@ curl -sL https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manag
 ```powershell
 irm https://raw.githubusercontent.com/sidhanthapoddar99/projects-sync-manager/master/install.ps1 | iex
 ```
-
-
-
-
 
 That's it. The binary is cached in your temp folder (`/tmp/psm-cache/` or `%TEMP%\psm-cache\`) and reused on future runs. A new version is downloaded automatically when a release is published.
 
@@ -63,50 +61,76 @@ psm [flags]
 Flags:
   -d <path>    Target directory to scan (default: current directory)
   -h <depth>   Max depth for git repo discovery (default: 3)
+  --version    Print version and exit
 ```
 
-### Keyboard Controls
+---
 
-| Key | Action |
-|-----|--------|
-| `↑/↓` | Navigate siblings (same directory level) |
-| `→` | Enter / expand directory |
-| `←` | Collapse directory / go to parent |
-| `Enter` | Open repo detail panel (interactive) |
-| `S` | Sync selected repo (pull or push) |
-| `C` | Open in VS Code |
-| `E` | Open in file explorer |
-| `B` | Open remote repo in browser |
-| `r` | Refresh selected repo (fetch from remote) |
-| `R` | Refresh ALL repos (with y/n confirmation) |
-| `F` | Reference file menu |
-| `Q` | Quit |
-| `?` | Help |
+## Features
 
-### Repo Detail Panel (Enter on a git repo)
-
-| Key | Action |
-|-----|--------|
-| `↑/↓` | Navigate actions and branches |
-| `Enter` | Execute selected action |
-| `Esc/←` | Back to tree view |
-
-### Status Indicators
+### Tree View with Status Indicators
 
 ```
-my-project/   ● ✓                # green — fully synced
-api-server/   ● △ ↑2 ↓0         # yellow — 2 commits to push
-webapp/       ● ✗ +1 ~4 …2      # red — uncommitted changes
-experiments/  ● ?                # blue — no remote
-some-folder/  ○                  # grey — not a git repo
+my-project/     ● ✓                    # synced (green)
+api-server/     ● △ ↑2                 # 2 commits to push (yellow)
+webapp/         ● ✗ ~4 …2              # uncommitted changes (red)
+experiments/    ● ?                     # no remote (blue)
+data-scripts/   ● ✓ ≠                  # name mismatch (yellow ≠)
+some-folder/    ○                       # not a git repo (grey)
 ```
 
 | Symbol | Meaning |
 |--------|---------|
 | `●` / `○` | Git repo / not a git repo |
 | `✓` `△` `✗` `?` | Synced / partial / dirty / no remote |
+| `≠` | Folder name differs from remote repo name |
 | `↑N` `↓N` | Commits to push / pull |
 | `+N` `~N` `…N` | Staged / unstaged / untracked files |
+
+### Command Palette (`/`)
+
+A VS Code-style fuzzy search bar for all available commands. Type to search, `Tab` to auto-complete, `Enter` to execute.
+
+### Filters (`F`)
+
+Multi-select filter panel to focus on repos that need attention. Combine filters with OR logic — enable "Dirty" and "Partial" to see all repos that need work.
+
+Available filters: Dirty, Partial, Synced, No Remote, Ahead, Behind, Name Mismatch.
+
+### Repo Detail Panel (`Enter`)
+
+Interactive panel with per-branch sync control. Switch between branches and actions with `Tab`. Sync individual branches without switching — even non-current branches.
+
+### Reference Files (`f`)
+
+Generate a portable snapshot of your project structure. Load it on another machine to see what's missing, clone repos individually or in bulk, and sync matched repos.
+
+### Conservative Sync (`s`)
+
+Pull or push with safety checks — blocks on uncommitted changes and diverged branches. Uses `--ff-only` for pulls. No auto-conflict resolution.
+
+---
+
+## Keyboard Controls
+
+| Key | Action |
+|-----|--------|
+| `↑/↓` or `k/j` | Navigate siblings |
+| `→/←` or `l/h` | Enter/exit directories |
+| `Enter` | Open repo detail panel |
+| `/` | Command palette |
+| `F` | Filter panel |
+| `s` | Sync selected repo |
+| `r` | Refresh selected repo |
+| `R` | Refresh all repos |
+| `f` | Reference file menu |
+| `c` | Open in VS Code |
+| `e` | Open in file explorer |
+| `b` | Open in browser |
+| `?` | Help |
+| `q` | Quit |
+
+See **[GUIDE.md](GUIDE.md)** for all keybindings including detail panel, filter panel, command palette, and compare view.
 
 ---
 
@@ -140,9 +164,6 @@ upx --best dist/psm-linux-*
 # Tag and push — GitHub Actions builds and publishes binaries automatically
 git tag -a v0.1.0 -m "Initial release"
 git push origin v0.1.0
-
-# Or create a release manually with gh CLI
-# gh release create v0.1.0 dist/* --title "v0.1.0" --notes "Initial release"
 ```
 
 The workflow at `.github/workflows/release.yml` automatically:
@@ -151,17 +172,6 @@ The workflow at `.github/workflows/release.yml` automatically:
 3. Packages source archives (.tar.gz and .zip)
 4. Generates SHA256 checksums for all artifacts
 5. Creates a GitHub release with everything attached
-
----
-
-## Reference Files
-
-Generate a snapshot of your project structure:
-```
-Press F > G (Generate)
-```
-
-This creates `projects-ref.json` — a portable file listing all git repos and their remote URLs. Copy it to another machine, load it with `F > L` (Load), and PSM shows what's missing, what's extra, and lets you clone missing repos in one keystroke.
 
 ---
 

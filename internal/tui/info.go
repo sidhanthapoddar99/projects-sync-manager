@@ -43,7 +43,23 @@ func renderInfo(node *scanner.TreeNode, width, height int) string {
 		lines = append(lines, styleSection.Render("  Branch Status"))
 		lines = append(lines, "")
 
-		for _, b := range s.Branches {
+		// Reserve lines for header (above) + working tree section (below)
+		// Header: repo name, blank, remote, url, branch, blank = ~6 lines
+		// Working tree: section header, blank, up to 4 lines = ~6 lines
+		// Leave some breathing room
+		maxBranches := height - len(lines) - 8
+		if maxBranches < 3 {
+			maxBranches = 3
+		}
+
+		branches := s.Branches
+		truncated := false
+		if len(branches) > maxBranches {
+			branches = branches[:maxBranches]
+			truncated = true
+		}
+
+		for _, b := range branches {
 			marker := "  "
 			if b.IsCurrent {
 				marker = "* "
@@ -67,6 +83,9 @@ func renderInfo(node *scanner.TreeNode, width, height int) string {
 
 			lines = append(lines, "  "+marker+branchStyle.Render(branchName)+" "+styleLabel.Render(status))
 		}
+		if truncated {
+			lines = append(lines, styleLabel.Render(fmt.Sprintf("  ... %d more branches (Enter for details)", len(s.Branches)-maxBranches)))
+		}
 		lines = append(lines, "")
 	}
 
@@ -87,8 +106,11 @@ func renderInfo(node *scanner.TreeNode, width, height int) string {
 		}
 	}
 
-	// Pad to fill height
-	for len(lines) < height-8 {
+	// Truncate to fit panel height, then pad
+	if len(lines) > height-2 {
+		lines = lines[:height-2]
+	}
+	for len(lines) < height-2 {
 		lines = append(lines, "")
 	}
 

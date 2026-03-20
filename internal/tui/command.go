@@ -259,13 +259,12 @@ func (cp *CommandPalette) render(width, height int) string {
 	lines = append(lines, inputLine)
 	lines = append(lines, styleTreePrefix.Render(" "+strings.Repeat("─", paletteWidth-4)))
 
-	// Command list
-	visible := cp.filtered
-	if len(visible) > maxVisibleCommands {
-		visible = visible[:maxVisibleCommands]
-	}
+	// Command list — windowed around selectedIdx
+	startIdx, endIdx := centeredWindow(cp.selectedIdx, len(cp.filtered), maxVisibleCommands)
+	visible := cp.filtered[startIdx:endIdx]
 
-	for i, cmd := range visible {
+	for idx, cmd := range visible {
+		i := startIdx + idx
 		name := cmd.Name
 		hint := ""
 		if cmd.Hint != "" {
@@ -294,8 +293,8 @@ func (cp *CommandPalette) render(width, height int) string {
 		lines = append(lines, line)
 	}
 
-	if len(cp.filtered) > maxVisibleCommands {
-		lines = append(lines, styleLabel.Render(fmt.Sprintf("  ... %d more", len(cp.filtered)-maxVisibleCommands)))
+	if endIdx < len(cp.filtered) {
+		lines = append(lines, styleLabel.Render(fmt.Sprintf("  ↓ %d more...", len(cp.filtered)-endIdx)))
 	}
 
 	if len(cp.filtered) == 0 {
