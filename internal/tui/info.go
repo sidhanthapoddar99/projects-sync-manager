@@ -150,7 +150,7 @@ func renderActions(node *scanner.TreeNode, width int) string {
 
 		// Sync action
 		if s.HasRemote {
-			syncLabel := "  [S] Sync"
+			syncLabel := "  [s] Sync"
 			switch {
 			case s.Staged > 0 || s.Unstaged > 0:
 				syncLabel += styleGitDirty.Render(" (blocked: uncommitted changes)")
@@ -166,15 +166,15 @@ func renderActions(node *scanner.TreeNode, width int) string {
 			lines = append(lines, styleAction.Render(syncLabel))
 		}
 
-		lines = append(lines, styleAction.Render("  [C] Open in VS Code"))
-		lines = append(lines, styleAction.Render("  [E] Open in File Explorer"))
+		lines = append(lines, styleAction.Render("  [c] Open in VS Code"))
+		lines = append(lines, styleAction.Render("  [e] Open in File Explorer"))
 
 		if s.HasRemote {
-			lines = append(lines, styleAction.Render("  [B] Open in Browser"))
+			lines = append(lines, styleAction.Render("  [b] Open in Browser"))
 		}
 	} else {
-		lines = append(lines, styleAction.Render("  [C] Open in VS Code"))
-		lines = append(lines, styleAction.Render("  [E] Open in File Explorer"))
+		lines = append(lines, styleAction.Render("  [c] Open in VS Code"))
+		lines = append(lines, styleAction.Render("  [e] Open in File Explorer"))
 	}
 
 	return strings.Join(lines, "\n")

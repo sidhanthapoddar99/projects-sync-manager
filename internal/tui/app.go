@@ -374,7 +374,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.peer = msg.peer
 		m.viewMode = ViewPeerCompare
 		m.peerCompareTab = 0
-		m.statusText = fmt.Sprintf("Connected to %s", msg.hostname)
+		m.statusText = fmt.Sprintf("Connected to %s", m.peer.Hostname)
 		m.statusError = false
 		// Send our tree to the peer
 		m.sendTreeToPeer()
@@ -441,7 +441,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case connectFailedMsg:
 		m.statusText = fmt.Sprintf("Connection failed: %v", msg.err)
 		m.statusError = true
-		m.viewMode = ViewNormal
+		m.viewMode = ViewNetworkClientInput // allow re-entry
 		return m, nil
 
 	case sshCheckDoneMsg:
@@ -1206,13 +1206,50 @@ func (m Model) View() string {
 			styleAction.Render("Q") + styleLabel.Render("uit")
 	} else if m.viewMode == ViewPeerCompare {
 		pName := m.peerName()
-		navLine = styleLabel.Render("  ↑↓") + styleValue.Render(" navigate  ") +
-			styleAction.Render("1-5") + styleValue.Render(" tabs  ") +
-			styleAction.Render("Enter") + styleValue.Render(" action  ") +
-			styleAction.Render("D") + styleValue.Render(" disconnect  ") +
-			styleAction.Render("Esc") + styleValue.Render(" back  ") +
-			styleLabel.Render("│ ") +
-			styleGitSynced.Render(fmt.Sprintf("[Peer: %s]", pName))
+		peerBadge := styleLabel.Render("│ ") + styleGitSynced.Render(fmt.Sprintf("[Peer: %s]", pName))
+		switch m.peerCompareTab {
+		case 0: // Combined
+			navLine = styleLabel.Render("  ↑↓") + styleValue.Render(" nav  ") +
+				styleAction.Render("1-5") + styleValue.Render(" tabs  ") +
+				styleAction.Render("Enter") + styleValue.Render(" clone ") +
+				styleLabel.Render("(") + styleGitDirty.Render("red") + styleLabel.Render("→local ") +
+				styleGitPartial.Render("yellow") + styleLabel.Render("→peer) ") +
+				styleAction.Render("D") + styleValue.Render(" disconnect  ") +
+				peerBadge
+		case 1: // Local perspective
+			navLine = styleLabel.Render("  ↑↓") + styleValue.Render(" nav  ") +
+				styleAction.Render("1-5") + styleValue.Render(" tabs  ") +
+				styleAction.Render("Enter") + styleValue.Render(" clone locally  ") +
+				styleAction.Render("a") + styleValue.Render(" clone all  ") +
+				styleAction.Render("D") + styleValue.Render(" disconnect  ") +
+				styleLabel.Render("│ actions on ") + styleInfo.Render("this device") + " " +
+				peerBadge
+		case 2: // Remote perspective
+			navLine = styleLabel.Render("  ↑↓") + styleValue.Render(" nav  ") +
+				styleAction.Render("1-5") + styleValue.Render(" tabs  ") +
+				styleAction.Render("Enter") + styleValue.Render(" clone on peer  ") +
+				styleAction.Render("a") + styleValue.Render(" clone all  ") +
+				styleAction.Render("D") + styleValue.Render(" disconnect  ") +
+				styleLabel.Render("│ actions on ") + styleGitPartial.Render("peer") + " " +
+				peerBadge
+		case 3: // My Tree
+			navLine = styleLabel.Render("  ↑↓") + styleValue.Render(" nav  ") +
+				styleAction.Render("1-5") + styleValue.Render(" tabs  ") +
+				styleLabel.Render("[") + styleAction.Render("s") + styleLabel.Render("ync] ") +
+				styleLabel.Render("[") + styleAction.Render("r") + styleLabel.Render("efresh] ") +
+				styleLabel.Render("[") + styleAction.Render("c") + styleLabel.Render("ode] ") +
+				styleLabel.Render("[") + styleAction.Render("e") + styleLabel.Render("xplorer] ") +
+				styleAction.Render("D") + styleValue.Render(" disconnect  ") +
+				styleLabel.Render("│ actions on ") + styleInfo.Render("this device") + " " +
+				peerBadge
+		case 4: // Peer Tree
+			navLine = styleLabel.Render("  ↑↓") + styleValue.Render(" nav  ") +
+				styleAction.Render("1-5") + styleValue.Render(" tabs  ") +
+				styleLabel.Render("[") + styleAction.Render("s") + styleLabel.Render("ync on peer] ") +
+				styleAction.Render("D") + styleValue.Render(" disconnect  ") +
+				styleLabel.Render("│ actions on ") + styleGitPartial.Render("peer") + " " +
+				peerBadge
+		}
 	} else {
 	if m.confirmRefreshAll {
 		navLine = styleGitDirty.Render("  Press Y to confirm full refresh, any other key to cancel")

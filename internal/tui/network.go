@@ -448,14 +448,11 @@ func (m *Model) sendRemoteClone(relPath, remoteURL string) tea.Cmd {
 	}
 	m.statusText = fmt.Sprintf("Requesting peer to clone %s...", filepath.Base(relPath))
 	m.statusError = false
-	peer := m.peer
-	return func() tea.Msg {
-		_ = peer.Send(network.MsgCloneRequest, network.CloneRequestData{
-			Path: relPath,
-			URL:  remoteURL,
-		})
-		return nil
-	}
+	go m.peer.Send(network.MsgCloneRequest, network.CloneRequestData{
+		Path: relPath,
+		URL:  remoteURL,
+	})
+	return nil
 }
 
 // --- Peer connection/disconnection helpers ---
@@ -688,11 +685,14 @@ func (m *Model) handlePeerMessage(msg network.Message) tea.Cmd {
 			return nil
 		}
 		m.peerTree = &pt
-		if m.peerCompareTab <= 2 {
+		// Rebuild whichever view is active
+		switch m.peerCompareTab {
+		case 0, 1, 2:
 			m.rebuildPeerCompareView()
-		} else if m.peerCompareTab == 4 {
+		case 4:
 			m.rebuildPeerTreeView()
 		}
+		// Tab 3 doesn't need rebuild (it shows local tree)
 		if m.viewMode != ViewPeerCompare {
 			m.viewMode = ViewPeerCompare
 		}
@@ -899,7 +899,7 @@ func (m Model) renderNetworkServerWait() string {
 				Render(content))
 	}
 
-	lines = append(lines, styleLabel.Render("  Connection Code:"))
+	lines = append(lines, styleLabel.Render("  Connection Code: ")+styleAction.Render(m.serverCode))
 	lines = append(lines, "")
 
 	bigCode := renderBigCode(m.serverCode)
@@ -975,7 +975,7 @@ func renderPeerActions(node *scanner.TreeNode, width int) string {
 	lines = append(lines, "")
 
 	if node.IsGitRepo && node.Status != nil && node.Status.HasRemote {
-		lines = append(lines, styleAction.Render("  [S] Sync on peer"))
+		lines = append(lines, styleAction.Render("  [s] Sync on peer"))
 	}
 	lines = append(lines, "")
 	lines = append(lines, styleLabel.Render("  Actions execute on the peer's machine"))

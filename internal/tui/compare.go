@@ -384,6 +384,15 @@ func compareGetSiblings(node *compareTreeNode) ([]*compareTreeNode, int) {
 
 // --- Rendering ---
 
+// renderCompareLegend renders the color/symbol legend for compare views.
+func renderCompareLegend() string {
+	return styleLabel.Render("  ") +
+		styleMatchedIndicator.Render("[==]") + styleLabel.Render(" matched  ") +
+		styleMissingIndicator.Render("[--]") + styleLabel.Render(" missing  ") +
+		styleExtraIndicator.Render("[++]") + styleLabel.Render(" extra  ") +
+		styleRelocatedIndicator.Render("[⇄]") + styleLabel.Render(" relocated")
+}
+
 func (cv *CompareView) renderLeft(width, height int) string {
 	var lines []string
 	header := "Reference Comparison"
@@ -391,7 +400,9 @@ func (cv *CompareView) renderLeft(width, height int) string {
 		header = cv.headerText
 	}
 	lines = append(lines, styleHeader.Render("  "+header))
-	lines = append(lines, "")
+
+	// Legend
+	lines = append(lines, renderCompareLegend())
 
 	summary := fmt.Sprintf("  Matched: %d  Missing: %d  Extra: %d",
 		len(cv.result.Matched), len(cv.result.Missing), len(cv.result.Extra))
@@ -401,7 +412,7 @@ func (cv *CompareView) renderLeft(width, height int) string {
 	lines = append(lines, styleLabel.Render(summary))
 	lines = append(lines, styleTreePrefix.Render("  "+strings.Repeat("─", width-4)))
 
-	legendLines := 5 // header + blank + summary + separator + extra
+	legendLines := 5 // header + legend + summary + separator + extra
 	treeHeight := height - legendLines
 
 	startIdx, endIdx := centeredWindow(cv.selectedIdx, len(cv.flatNodes), treeHeight)
