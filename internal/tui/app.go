@@ -237,7 +237,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusText = "Refreshed"
 		m.statusError = false
 		m.loading = false
-		if m.viewMode != ViewPeerCompare {
+		if m.viewMode == ViewPeerCompare {
+			m.rebuildPeerCompareView()
+		} else {
 			m.viewMode = ViewNormal
 		}
 		m.busyCh = nil
@@ -252,8 +254,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusText = fmt.Sprintf("Refreshed %s", msg.node.Name)
 		m.statusError = false
 		if m.viewMode == ViewBusy {
-			m.viewMode = ViewNormal
+			if m.peer != nil && m.peerTree != nil {
+				m.viewMode = ViewPeerCompare
+			} else {
+				m.viewMode = ViewNormal
+			}
 			m.busyCh = nil
+		}
+		if m.viewMode == ViewPeerCompare {
+			m.rebuildPeerCompareView()
 		}
 		m.sendTreeToPeer()
 		return m, nil
@@ -271,6 +280,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detailView.rebuild()
 		}
 		m.rebuildFlatList()
+		if m.viewMode == ViewPeerCompare {
+			m.rebuildPeerCompareView()
+		}
 		m.sendTreeToPeer()
 		return m, nil
 
@@ -289,8 +301,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.rebuildFlatList()
 		if m.viewMode == ViewBusy {
-			m.viewMode = ViewNormal
+			if m.peer != nil && m.peerTree != nil {
+				m.viewMode = ViewPeerCompare
+			} else {
+				m.viewMode = ViewNormal
+			}
 			m.busyCh = nil
+		}
+		if m.viewMode == ViewPeerCompare {
+			m.rebuildPeerCompareView()
 		}
 		m.sendTreeToPeer()
 		return m, nil
@@ -308,13 +327,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusText = fmt.Sprintf("Cloned %s", msg.path)
 			m.statusError = false
 			clonedPath := filepath.Join(m.rootPath, msg.path)
-			// Insert into the scanner tree and get status
 			newNode := scanner.InsertNode(m.root, clonedPath)
 			if newNode != nil {
 				m.rebuildFlatList()
 			}
-			// Update compare view if active
-			if (m.viewMode == ViewCompare || m.viewMode == ViewPeerCompare) && m.compareView != nil {
+			if m.viewMode == ViewPeerCompare {
+				m.rebuildPeerCompareView()
+			} else if m.viewMode == ViewCompare && m.compareView != nil {
 				m.compareView.markCloned(msg.path, newNode)
 			}
 			m.sendTreeToPeer()
@@ -435,6 +454,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				})
 			}
 			m.sendTreeToPeer()
+			// Rebuild our own compare view since local tree changed
+			if m.viewMode == ViewPeerCompare {
+				m.rebuildPeerCompareView()
+			}
 		}
 		return m, nil
 
@@ -1203,7 +1226,7 @@ func (m Model) View() string {
 			styleAction.Render("Esc") + styleValue.Render(" back  ") +
 			styleLabel.Render("│ ") +
 			styleAction.Render("?") + styleLabel.Render("Help ") +
-			styleAction.Render("Q") + styleLabel.Render("uit")
+			styleAction.Render("q") + styleLabel.Render("uit")
 	} else if m.viewMode == ViewPeerCompare {
 		pName := m.peerName()
 		peerBadge := styleLabel.Render("│ ") + styleGitSynced.Render(fmt.Sprintf("[Peer: %s]", pName))
