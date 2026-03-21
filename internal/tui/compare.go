@@ -351,8 +351,9 @@ func (cv *CompareView) navigateLeft() {
 	}
 	node := cv.flatNodes[cv.selectedIdx]
 
-	// If expanded directory without entry descendants that need to stay open, collapse
-	if node.Expanded && len(node.Children) > 0 && !node.isLeaf() {
+	// If expanded directory that does NOT contain entry descendants, collapse it.
+	// Mirrors normal nav: folders with entries inside cannot be collapsed.
+	if node.Expanded && len(node.Children) > 0 && !node.isLeaf() && !node.hasEntryDescendant() {
 		node.Expanded = false
 		cv.rebuildFlatList()
 		return

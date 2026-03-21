@@ -3,6 +3,7 @@ package network
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/gorilla/websocket"
 )
@@ -18,7 +19,8 @@ func Connect(url, code string) (*Peer, string, error) {
 	}
 
 	// Send auth
-	authData := AuthData{Code: code}
+	hostname, _ := os.Hostname()
+	authData := AuthData{Code: code, Hostname: hostname}
 	authBytes, _ := EncodeMessage(MsgAuth, authData)
 	if err := conn.WriteMessage(websocket.TextMessage, authBytes); err != nil {
 		conn.Close()

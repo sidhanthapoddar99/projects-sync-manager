@@ -19,6 +19,12 @@ const (
 	MsgAuthFail   = "auth_fail"
 	MsgTree       = "tree"
 	MsgDisconnect = "disconnect"
+
+	// Remote action requests and results
+	MsgCloneRequest  = "clone_req"
+	MsgCloneResult   = "clone_res"
+	MsgSyncRequest   = "sync_req"
+	MsgActionResult  = "action_res"
 )
 
 // Message is the envelope for all WebSocket messages.
@@ -29,7 +35,27 @@ type Message struct {
 
 // AuthData is sent by the client to authenticate.
 type AuthData struct {
-	Code string `json:"code"`
+	Code     string `json:"code"`
+	Hostname string `json:"hostname"`
+}
+
+// CloneRequestData asks the peer to clone a repo.
+type CloneRequestData struct {
+	Path string `json:"path"`
+	URL  string `json:"url"`
+}
+
+// SyncRequestData asks the peer to sync a repo.
+type SyncRequestData struct {
+	Path string `json:"path"`
+}
+
+// ActionResultData is sent back after a remote action completes.
+type ActionResultData struct {
+	Action  string `json:"action"`
+	Path    string `json:"path"`
+	Message string `json:"message,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 // AuthOKData is sent by the server on successful auth.

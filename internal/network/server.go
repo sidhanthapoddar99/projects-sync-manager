@@ -61,7 +61,11 @@ func StartServer(port int, code string) (*http.Server, chan ServerResult, error)
 		okBytes, _ := EncodeMessage(MsgAuthOK, okData)
 		_ = conn.WriteMessage(websocket.TextMessage, okBytes)
 
-		peer := NewPeer(conn, "client")
+		clientHostname := authData.Hostname
+		if clientHostname == "" {
+			clientHostname = "peer"
+		}
+		peer := NewPeer(conn, clientHostname)
 		resultCh <- ServerResult{Peer: peer, Hostname: hostname}
 	})
 

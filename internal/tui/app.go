@@ -122,14 +122,17 @@ type Model struct {
 	pendingClone *pendingCloneInfo // clone waiting for user's SSH/HTTPS choice
 
 	// Network peer sync
-	peer           *network.Peer
-	peerTree       *network.PeerTree
-	peerCompareTab int              // 0=combined, 1=local, 2=remote
-	httpServer     *http.Server
-	serverCode     string
-	serverIPs      []string
-	networkInput   [3]string        // [0]=port, [1]=url, [2]=code
-	networkField   int              // active input field (client form)
+	peer            *network.Peer
+	peerTree        *network.PeerTree
+	peerCompareTab  int              // 0=combined, 1=local, 2=remote, 3=my tree, 4=peer tree
+	httpServer      *http.Server
+	serverCode      string
+	serverIPs       []string
+	networkInput    [3]string        // [0]=port, [1]=url, [2]=code
+	networkField    int              // active input field (client form)
+	peerRoot        *scanner.TreeNode   // virtual tree from peer's data (tab 4)
+	peerFlatNodes   []*scanner.TreeNode // flattened peer tree (tab 4)
+	peerSelectedIdx int                 // cursor in peer tree (tab 4)
 }
 
 // NewModel creates a new TUI model.
@@ -399,6 +402,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.statusText = "Peer disconnected"
 		m.statusError = false
+		return m, nil
+
+	case peerActionDoneMsg:
+		// A locally-executed action triggered by peer request completed
+		if msg.err != nil {
+			m.statusText = fmt.Sprintf("Peer-requested %s failed: %v", msg.action, msg.err)
+			m.statusError = true
+			if m.peer != nil {
+				go m.peer.Send(network.MsgActionResult, network.ActionResultData{
+					Action: msg.action, Path: msg.path, Error: msg.err.Error(),
+				})
+			}
+		} else {
+			m.statusText = fmt.Sprintf("Peer-requested %s: %s", msg.action, msg.message)
+			m.statusError = false
+			if msg.action == "clone" {
+				clonedPath := filepath.Join(m.rootPath, msg.path)
+				scanner.InsertNode(m.root, clonedPath)
+				m.rebuildFlatList()
+			} else if msg.action == "sync" {
+				// Refresh the synced node
+				node := findNodeByPath(m.root, filepath.Join(m.rootPath, msg.path))
+				if node != nil {
+					scanner.RefreshNode(node)
+					m.rebuildFlatList()
+				}
+			}
+			if m.peer != nil {
+				go m.peer.Send(network.MsgActionResult, network.ActionResultData{
+					Action: msg.action, Path: msg.path, Message: msg.message,
+				})
+			}
+			m.sendTreeToPeer()
+		}
 		return m, nil
 
 	case connectFailedMsg:
@@ -953,7 +990,12 @@ func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		m.viewMode = ViewNormal
+		// Return to peer compare if connected, else normal
+		if m.peer != nil && m.peerTree != nil {
+			m.viewMode = ViewPeerCompare
+		} else {
+			m.viewMode = ViewNormal
+		}
 		m.detailView = nil
 		return m, nil
 	default:
@@ -1067,7 +1109,20 @@ func (m Model) View() string {
 
 	// Left panel
 	var leftContent string
-	if (m.viewMode == ViewCompare || m.viewMode == ViewPeerCompare) && m.compareView != nil {
+	if m.viewMode == ViewPeerCompare && m.peerCompareTab == 3 {
+		// Tab 3: My Tree (normal local view with tab bar)
+		tabBar := m.renderPeerTabBar(leftWidth)
+		var filterStatus string
+		if m.filters.IsActive() {
+			count := m.filters.CountMatches(m.root.FlattenVisible())
+			filterStatus = fmt.Sprintf("Filter: %s (%d repos)", m.filters.ActiveNames(), count)
+		}
+		leftContent = tabBar + "\n" + renderTree(m.flatNodes, m.selectedIdx, leftWidth, panelHeight-1, filterStatus)
+	} else if m.viewMode == ViewPeerCompare && m.peerCompareTab == 4 {
+		// Tab 4: Peer Tree (peer's repos with tab bar)
+		tabBar := m.renderPeerTabBar(leftWidth)
+		leftContent = tabBar + "\n" + renderTree(m.peerFlatNodes, m.peerSelectedIdx, leftWidth, panelHeight-1, "")
+	} else if (m.viewMode == ViewCompare || m.viewMode == ViewPeerCompare) && m.compareView != nil {
 		leftContent = m.compareView.renderLeft(leftWidth, panelHeight)
 	} else {
 		var filterStatus string
@@ -1087,6 +1142,30 @@ func (m Model) View() string {
 	var rightContent string
 	if m.viewMode == ViewDetail && m.detailView != nil {
 		rightContent = m.detailView.render(rightWidth, panelHeight)
+	} else if m.viewMode == ViewPeerCompare && m.peerCompareTab == 3 {
+		// Tab 3: normal info + actions for local tree
+		var selectedNode *scanner.TreeNode
+		if m.selectedIdx < len(m.flatNodes) {
+			selectedNode = m.flatNodes[m.selectedIdx]
+		}
+		infoHeight := panelHeight * 2 / 3
+		actionHeight := panelHeight - infoHeight - 1
+		infoContent := renderInfo(selectedNode, rightWidth, infoHeight)
+		actionContent := renderActions(selectedNode, rightWidth)
+		rightContent = infoContent + "\n" + strings.Repeat("─", rightWidth-2) + "\n" + actionContent
+		_ = actionHeight
+	} else if m.viewMode == ViewPeerCompare && m.peerCompareTab == 4 {
+		// Tab 4: info + remote actions for peer tree
+		var selectedNode *scanner.TreeNode
+		if m.peerSelectedIdx < len(m.peerFlatNodes) {
+			selectedNode = m.peerFlatNodes[m.peerSelectedIdx]
+		}
+		infoHeight := panelHeight * 2 / 3
+		actionHeight := panelHeight - infoHeight - 1
+		infoContent := renderInfo(selectedNode, rightWidth, infoHeight)
+		actionContent := renderPeerActions(selectedNode, rightWidth)
+		rightContent = infoContent + "\n" + strings.Repeat("─", rightWidth-2) + "\n" + actionContent
+		_ = actionHeight
 	} else if (m.viewMode == ViewCompare || m.viewMode == ViewPeerCompare) && m.compareView != nil {
 		rightContent = m.compareView.renderRight(rightWidth, panelHeight)
 	} else {
@@ -1126,18 +1205,14 @@ func (m Model) View() string {
 			styleAction.Render("?") + styleLabel.Render("Help ") +
 			styleAction.Render("Q") + styleLabel.Render("uit")
 	} else if m.viewMode == ViewPeerCompare {
-		peerName := ""
-		if m.peerTree != nil {
-			peerName = m.peerTree.Hostname
-		}
+		pName := m.peerName()
 		navLine = styleLabel.Render("  ↑↓") + styleValue.Render(" navigate  ") +
-			styleAction.Render("1/2/3") + styleValue.Render(" tabs  ") +
-			styleAction.Render("Enter") + styleValue.Render(" clone  ") +
-			styleAction.Render("A") + styleValue.Render(" clone all  ") +
+			styleAction.Render("1-5") + styleValue.Render(" tabs  ") +
+			styleAction.Render("Enter") + styleValue.Render(" action  ") +
 			styleAction.Render("D") + styleValue.Render(" disconnect  ") +
 			styleAction.Render("Esc") + styleValue.Render(" back  ") +
 			styleLabel.Render("│ ") +
-			styleGitSynced.Render(fmt.Sprintf("[Connected: %s]", peerName))
+			styleGitSynced.Render(fmt.Sprintf("[Peer: %s]", pName))
 	} else {
 	if m.confirmRefreshAll {
 		navLine = styleGitDirty.Render("  Press Y to confirm full refresh, any other key to cancel")
@@ -1148,7 +1223,7 @@ func (m Model) View() string {
 		}
 		peerBadge := ""
 		if m.peer != nil {
-			peerBadge = styleLabel.Render("│ ") + styleGitSynced.Render(fmt.Sprintf("[Connected: %s]", m.peer.Hostname))
+			peerBadge = styleLabel.Render("│ ") + styleGitSynced.Render(fmt.Sprintf("[Peer: %s]", m.peerName()))
 		}
 		navLine = styleLabel.Render("  ↑↓") + styleValue.Render(" siblings  ") +
 			styleLabel.Render("→") + styleValue.Render(" enter dir  ") +
@@ -1261,7 +1336,11 @@ func (m Model) renderHelp() string {
   Peer Sync
   ─────────
   N              Open peer sync menu
-  1/2/3          Switch tabs (Combined/Local/Remote)
+  1              Combined view (both perspectives)
+  2              Local perspective (actions on this machine)
+  3              Remote perspective (actions on peer)
+  4              My Tree (normal local view)
+  5              Peer Tree (peer's repos, remote actions)
   D              Disconnect from peer
 
   General
