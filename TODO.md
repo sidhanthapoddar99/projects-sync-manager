@@ -2,14 +2,8 @@
 
 ## Reference File / Load Feature
 
-### Detect repos present under a different directory
-When loading a reference file and comparing, if a repo's remote URL matches a local repo but the relative path differs (i.e. the repo was moved/renamed), PSM currently marks it as `[--]` missing AND `[++]` extra instead of recognizing it as the same repo in a different location.
-
-**Proposed behavior:**
-- During comparison, match by remote URL first, then by path
-- If a remote URL matches but the path differs, show a new indicator like `[~~]` (relocated)
-- Right panel should display both paths: expected (from reference) vs actual (local)
-- Offer an action to update the reference file with the new path
+### ~~Detect repos present under a different directory~~ ✅ Done
+Relocated repos are now detected via URL matching and shown with `[⇄]` indicator in purple. Right panel shows both expected and actual paths.
 
 ### Handle multiple remotes
 Currently PSM only considers `origin` for remote URL matching and sync operations. Repos can have multiple remotes (e.g. `origin`, `upstream`, `fork`).
@@ -30,11 +24,19 @@ Currently PSM only considers `origin` for remote URL matching and sync operation
   }
   ```
 
+## Peer Sync
+
+- [ ] Peer-initiated refresh request — allow peer to request you to refresh a specific repo
+- [ ] Bulk remote sync — sync all matched repos on the peer in one action
+- [ ] Connection resilience — auto-reconnect on temporary network drops
+- [ ] Multiple peers — support more than one simultaneous connection
+- [ ] Transfer reference files over the WebSocket instead of manual copying
+
 ## Other Ideas
 
 - [ ] Submodule handling — treat as separate repos or ignore?
 - [ ] Stash-pull-unstash flow for repos with uncommitted changes
 - [ ] Reference file location option — store in `~/.config/psm/` instead of scanned dir
 - [ ] Bulk branch sync — sync all branches across all repos (with safety checks)
-- [ ] Filtering/search in the tree view (e.g. only show dirty repos)
+- ~~[ ] Filtering/search in the tree view (e.g. only show dirty repos)~~ ✅ Done (filter panel with 7 filter types)
 - [ ] Show version number and build date in the app (e.g. in help screen or status bar) — inject via `-ldflags` at build time

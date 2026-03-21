@@ -7,6 +7,7 @@ A Go-based TUI application for managing and syncing 60+ git repositories across 
 - **Language:** Go (module: `github.com/sid/psm`)
 - **TUI:** bubbletea + lipgloss (Charm stack)
 - **Git:** shells out to `git` CLI with `-c safe.directory=*` on all commands
+- **Network:** gorilla/websocket for peer-to-peer sync
 - **Build:** `CGO_ENABLED=0` for static binaries, UPX compression for linux releases
 
 ## Architecture
@@ -23,6 +24,11 @@ internal/
     ignore.go                  # .psmignore + built-in ignore patterns
   reference/
     reference.go               # Generate/Save/Load/Compare reference files (JSON)
+  network/
+    protocol.go                # Message types, PeerRepo/PeerTree, code gen, conversions
+    peer.go                    # Peer connection wrapper (read goroutine → channel, mutex write)
+    server.go                  # HTTP server + WebSocket upgrade + code auth
+    client.go                  # WebSocket dialer + auth handshake
   tui/
     app.go                     # Main bubbletea Model, all message handling, View()
     tree.go                    # Left panel tree rendering, legend, centeredWindow
@@ -31,6 +37,7 @@ internal/
     detail.go                  # Interactive repo detail panel (branches + actions, Tab to switch)
     actions.go                 # Async action handlers (sync, open, refresh)
     compare.go                 # Reference file comparison view (tree-based)
+    network.go                 # Peer sync TUI: 5-tab views, remote actions, virtual peer tree
     styles.go                  # All lipgloss colors and styles
   opener/
     opener.go                  # OS-aware openers (VSCode, explorer, browser) with WSL fallback
@@ -66,6 +73,9 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) automatically buil
 - Progress is reported via channels from scanner to TUI using `tea.Batch`
 - Navigation is sibling-based (up/down move between siblings, not sequential list items)
 - `var version = "dev"` in main.go is overridden at build time via `-ldflags`
+- Peer sync uses `Peer.readLoop()` goroutine → `InCh` channel, bridged to bubbletea via `waitForPeerMsg()`
+- Remote actions (clone/sync on peer) use `MsgCloneRequest`/`MsgSyncRequest` → peer executes locally → sends `MsgActionResult` + updated tree
+- Virtual peer tree (`buildPeerTreeNodes`) creates `scanner.TreeNode` from `PeerTree` for reuse with existing `renderTree()`
 
 ## TODOs
 See `TODO.md` for planned improvements (relocated repo detection, multiple remote handling, etc.)

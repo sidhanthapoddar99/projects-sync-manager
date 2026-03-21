@@ -146,6 +146,20 @@ Generate a portable snapshot of your project structure. Load it on another machi
 
 When a folder name doesn't match the remote repo name (`≠` indicator), press `n` to rename the folder with confirmation.
 
+### Peer-to-Peer Sync (`N`)
+
+Compare repos between two machines in real-time over WebSocket. One PSM instance starts a server, another connects with a 4-character code. Five tabs give different perspectives:
+
+| Tab | View | Actions Execute On |
+|-----|------|--------------------|
+| `1` | Combined — all repos from both sides | Red=local, Yellow=peer |
+| `2` | Local perspective — peer as reference | This machine |
+| `3` | Remote perspective — your repos as reference | Peer's machine |
+| `4` | My Tree — normal local view | This machine |
+| `5` | Peer Tree — peer's repo tree | Peer's machine |
+
+Changes propagate live — clone or sync on either side and both views update automatically.
+
 ### Conservative Sync (`s`)
 
 Pull or push with safety checks — blocks on uncommitted changes and diverged branches. Uses `--ff-only` for pulls. No auto-conflict resolution.
@@ -169,6 +183,7 @@ Pull or push with safety checks — blocks on uncommitted changes and diverged b
 | `e` | Open in file explorer |
 | `b` | Open in browser |
 | `n` | Rename folder to match repo name |
+| `N` | Peer sync menu |
 | `?` | Help |
 | `q` | Quit |
 

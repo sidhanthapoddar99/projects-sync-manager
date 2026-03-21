@@ -1271,7 +1271,7 @@ func (m Model) View() string {
 			styleLabel.Render("[") + styleAction.Render("F") + styleLabel.Render("ilter]") + filterBadge + " " +
 			styleLabel.Render("[") + styleAction.Render("f") + styleLabel.Render("ile ref] ") +
 			styleLabel.Render("[") + styleAction.Render("N") + styleLabel.Render("etwork] ") +
-			styleLabel.Render("[") + styleAction.Render("S") + styleLabel.Render("ync] ") +
+			styleLabel.Render("[") + styleAction.Render("s") + styleLabel.Render("ync] ") +
 			styleLabel.Render("[") + styleAction.Render("n") + styleLabel.Render("ame] ") +
 			styleLabel.Render("[") + styleAction.Render("r") + styleLabel.Render("efresh] ") +
 			styleLabel.Render("[") + styleAction.Render("?") + styleLabel.Render("Help] ") +

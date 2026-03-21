@@ -17,6 +17,7 @@ A comprehensive guide to using Projects Sync Manager.
 - [Command Palette](#command-palette)
 - [Filters](#filters)
 - [Reference Files](#reference-files)
+- [Peer-to-Peer Sync](#peer-to-peer-sync)
 - [Opening External Tools](#opening-external-tools)
 - [Ignore File](#ignore-file)
 - [Tips & Workflows](#tips--workflows)
@@ -166,10 +167,10 @@ Press `s` on a git repo to sync its current branch:
 
 The right panel shows what will happen before you press sync:
 ```
-[S] Sync (push 2 commits)
-[S] Sync (pull 3 commits)
-[S] Sync (blocked: uncommitted changes)
-[S] Sync (up to date)
+[s] Sync (push 2 commits)
+[s] Sync (pull 3 commits)
+[s] Sync (blocked: uncommitted changes)
+[s] Sync (up to date)
 ```
 
 ### Per-Branch Sync (Detail Panel)
@@ -249,6 +250,9 @@ Press `/` to open the command palette — a VS Code-style fuzzy search bar for a
 | Filter: Toggle Name Mismatch | Toggle the name mismatch filter |
 | Filter: Clear All | Clear all active filters |
 | Filter: Open Panel | Open the filter panel |
+| Network: Start Server | Start a peer sync server |
+| Network: Connect to Peer | Connect to a peer sync server |
+| Network: Disconnect | Disconnect from peer |
 | Help | Show the help overlay |
 | Quit | Quit the application |
 
@@ -352,6 +356,86 @@ When cloning, PSM checks if SSH access is available:
 
 ---
 
+## Peer-to-Peer Sync
+
+Compare and sync repos between two machines in real-time over WebSocket. No reference files needed — both PSM instances exchange their repo trees live.
+
+### Starting a Connection
+
+**Machine A (server):**
+1. Press `N` to open the peer sync menu
+2. Press `S` to start a server
+3. Enter a port (default 3000), press `Enter`
+4. Note the 4-character code and IP addresses shown
+
+**Machine B (client):**
+1. Press `N` to open the peer sync menu
+2. Press `C` to connect
+3. Enter the server's IP:port (e.g. `192.168.1.5:3000`)
+4. Tab to the code field, enter the 4-character code
+5. Press `Enter`
+
+Both machines immediately enter the comparison view. If the code is wrong, you can re-enter it without restarting.
+
+### Five Views
+
+Once connected, use number keys `1`-`5` to switch between views:
+
+| Tab | View | Description | Actions Execute On |
+|-----|------|-------------|--------------------|
+| `1` | Combined | All repos from both machines. Green=on both, Red=only on peer, Yellow=only on you | Red→clone locally, Yellow→clone on peer |
+| `2` | Local | Peer's tree as reference, compared against your local repos | This machine |
+| `3` | Remote | Your tree as reference, from peer's perspective | Peer's machine |
+| `4` | My Tree | Normal tree view of your local repos | This machine |
+| `5` | Peer Tree | Normal tree view of peer's repos with their sync states | Peer's machine |
+
+### Compare View Legend
+
+| Symbol | Color | Meaning |
+|--------|-------|---------|
+| `[==]` | Green | Repo exists on both machines at same relative path |
+| `[--]` | Red | Repo exists on the reference side but not locally |
+| `[++]` | Yellow | Repo exists locally but not on the reference side |
+| `[⇄]` | Purple | Same repo (by URL) but at a different relative path |
+
+### Actions
+
+In views 1-3 (compare views):
+- `Enter` — Clone the selected missing repo (locally or on peer, depending on view)
+- `a` — Clone all missing repos
+- Navigation with arrow keys / hjkl
+
+In view 4 (My Tree):
+- All normal actions work: `s` sync, `r` refresh, `c` VS Code, `e` explorer, `b` browser, `Enter` detail panel
+
+In view 5 (Peer Tree):
+- `s` — Request the peer to sync the selected repo
+- Navigation with arrow keys / hjkl
+
+### Live Updates
+
+Changes propagate automatically. When you clone or sync a repo, your tree is re-sent to the peer, and their comparison view updates in real-time. The same happens when the peer makes changes.
+
+### Disconnecting
+
+- Press `D` to disconnect from the peer
+- Press `Esc` to disconnect and return to normal view
+- Press `q` to quit (also disconnects)
+
+### Peer Sync Keyboard Reference
+
+| Key | Action |
+|-----|--------|
+| `N` | Open peer sync menu |
+| `1`-`5` | Switch between views |
+| `Enter` | Clone missing repo (views 1-3) |
+| `a` | Clone all missing repos (views 1-3) |
+| `s` | Sync (view 4: local, view 5: on peer) |
+| `D` | Disconnect |
+| `Esc` | Disconnect and return to normal |
+
+---
+
 ## Opening External Tools
 
 | Key | Action |
@@ -430,6 +514,7 @@ Use filters to focus:
 | `e` | Open in file explorer |
 | `b` | Open in browser |
 | `n` | Rename folder to match repo name |
+| `N` | Peer sync menu |
 | `?` | Help |
 | `q` | Quit |
 
@@ -470,3 +555,14 @@ Use filters to focus:
 | `a` | Clone all missing |
 | `S` | Sync all matched |
 | `Esc` | Back to normal view |
+
+### Peer Sync
+
+| Key | Action |
+|-----|--------|
+| `1`-`5` | Switch views |
+| `Enter` | Clone missing (views 1-3) |
+| `a` | Clone all missing (views 1-3) |
+| `s` | Sync (view 4: local, view 5: peer) |
+| `D` | Disconnect |
+| `Esc` | Disconnect and back |

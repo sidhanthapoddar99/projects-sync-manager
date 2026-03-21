@@ -307,16 +307,63 @@ internal/
     scanner.go         # directory tree scanning with goroutine pool
   reference/
     reference.go       # generate/load/compare reference files
+  network/
+    protocol.go        # WebSocket message types, PeerTree, conversions
+    peer.go            # peer connection wrapper (read loop → channel)
+    server.go          # HTTP + WebSocket server with code auth
+    client.go          # WebSocket client dialer + auth handshake
   tui/
     app.go             # bubbletea main model, resize handling
     tree.go            # left panel - tree navigation
     info.go            # right panel - repo info display
     actions.go         # right panel - action handlers
     compare.go         # reference file comparison view
+    network.go         # peer sync views, remote actions, virtual peer tree
     styles.go          # lipgloss styles and colors
   opener/
     opener.go          # OS-aware open commands (vscode, explorer, browser)
 ```
+
+---
+
+## Peer-to-Peer Sync
+
+### Connection Flow
+
+1. **Server**: User presses `N` → "Start Server" → enters port (default 3000) → server starts, generates 4-char code, displays local IPs
+2. **Client**: User presses `N` → "Connect" → enters URL + code → connects via WebSocket
+3. **Handshake**: Client sends code + hostname, server validates → both exchange repo trees
+4. **Live comparison**: Both see comparison views with 5 tabs. Changes auto-propagate
+
+### Protocol (JSON over WebSocket)
+
+```
+Client → Server:  {"type":"auth","data":{"code":"A7K2","hostname":"my-pc"}}
+Server → Client:  {"type":"auth_ok","data":{"hostname":"server-pc"}}
+                   {"type":"auth_fail"}
+Bidirectional:     {"type":"tree","data":{PeerTree}}
+                   {"type":"clone_req","data":{"path":"...","url":"..."}}
+                   {"type":"sync_req","data":{"path":"..."}}
+                   {"type":"action_res","data":{"action":"clone","path":"...","message":"..."}}
+                   {"type":"disconnect"}
+```
+
+### Five Views
+
+| Tab | View | Actions |
+|-----|------|---------|
+| 1 | Combined — all repos from both | Red=clone local, Yellow=clone on peer |
+| 2 | Local perspective — peer as reference | Actions on this machine |
+| 3 | Remote perspective — inverted | Actions on peer |
+| 4 | My Tree — normal local view | All normal actions |
+| 5 | Peer Tree — peer's repos | Remote sync via peer |
+
+### Remote Actions
+
+When a peer requests an action (clone/sync), the receiving side:
+1. Executes the action locally
+2. Sends back an `action_res` with the result
+3. Sends an updated tree so the requester's view refreshes
 
 ---
 
