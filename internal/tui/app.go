@@ -1298,7 +1298,7 @@ func (m Model) View() string {
 			styleLabel.Render("[") + styleAction.Render("n") + styleLabel.Render("ame] ") +
 			styleLabel.Render("[") + styleAction.Render("r") + styleLabel.Render("efresh] ") +
 			styleLabel.Render("[") + styleAction.Render("?") + styleLabel.Render("Help] ") +
-			styleLabel.Render("[") + styleAction.Render("Q") + styleLabel.Render("uit]") +
+			styleLabel.Render("[") + styleAction.Render("q") + styleLabel.Render("uit]") +
 			peerBadge
 	}
 	}
@@ -1406,7 +1406,7 @@ func (m Model) renderHelp() string {
   General
   ───────
   ?              Toggle this help
-  Q / Ctrl+C     Quit
+  q / Ctrl+C     Quit
 
   Press any key to dismiss...
 `
